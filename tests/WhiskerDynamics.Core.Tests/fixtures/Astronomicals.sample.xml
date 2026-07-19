@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Assets>
+    <StellarBody Id="Sol">
+        <MeanRadius Km="696342" />
+        <Mass Suns="1" />
+        <Color R="1" G="1" B="1" />
+        <Sunlight R="9" G="9" B="9" />
+    </StellarBody>
+
+    <PlanetaryBody Id="Mercury" Parent="Sol">
+        <Orbit DefinitionFrame="Ecliptic">
+            <SemiMajorAxis Km="5.790896153292818E+07" />
+            <Inclination Degrees="7.003433958539783E+00" />
+            <Eccentricity Value="2.056462028967717E-01" />
+            <LongitudeOfAscendingNode Degrees="4.829884437379905E+01" />
+            <ArgumentOfPeriapsis Degrees="2.919855011314794E+01" />
+            <TimeAtPeriapsis Seconds="-563615.3399035392" />
+        </Orbit>
+        <Rotation DefinitionFrame="Ecliptic">
+            <SiderealPeriod Days="58.6463" />
+            <Tilt Degrees="7.0354" />
+            <Azimuth Degrees="228.20282" />
+            <InitialParentFacingLongitude Degrees="179.685634" />
+        </Rotation>
+        <MeshCollection Id="Default"/>
+        <MeanRadius Km="2439.7" />
+        <Mass Yg="330.2" />
+        <Color R="1" G="1" B="1" />
+    </PlanetaryBody>
+
+    <PlanetaryBody Id="TestMoon" Parent="Mercury">
+        <Orbit DefinitionFrame="Ecliptic">
+            <SemiMajorAxis Km="10000" />
+            <Inclination Degrees="0" />
+            <Eccentricity Value="0.1" />
+            <LongitudeOfAscendingNode Degrees="0" />
+            <ArgumentOfPeriapsis Degrees="0" />
+            <TimeAtPeriapsis Seconds="0" />
+        </Orbit>
+        <MeanRadius Km="10" />
+        <Mass Kg="1E+15" />
+    </PlanetaryBody>
+
+    <PeriodicComet Id="TestComet" Parent="Sol">
+        <Orbit DefinitionFrame="Ecliptic">
+            <SemiMajorAxis Km="1E+09" />
+            <Inclination Degrees="0" />
+            <Eccentricity Value="0.995" />
+            <LongitudeOfAscendingNode Degrees="0" />
+            <ArgumentOfPeriapsis Degrees="0" />
+            <TimeAtPeriapsis Seconds="-272712751" />
+        </Orbit>
+        <MeanRadius Km="10" />
+        <Mass Kg="1E+13" />
+    </PeriodicComet>
+</Assets>

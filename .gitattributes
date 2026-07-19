@@ -1,0 +1,6 @@
+* text=auto
+*.cs text
+*.csproj text
+*.slnx text
+*.md text
+*.xml text

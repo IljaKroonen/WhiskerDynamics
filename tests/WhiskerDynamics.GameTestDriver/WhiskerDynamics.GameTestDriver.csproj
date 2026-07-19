@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <StarMapDir Condition="'$(StarMapDir)' == '' and '$(STARMAP_DIR)' != ''">$(STARMAP_DIR)</StarMapDir>
+    <StarMapDir Condition="'$(StarMapDir)' == ''">$(LOCALAPPDATA)\StarMap</StarMapDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WhiskerDynamics.GameTestDriver.Runtime\WhiskerDynamics.GameTestDriver.Runtime.csproj" />
+    <Reference Include="StarMap.API"><HintPath>$(StarMapDir)\StarMap.API.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- One mod commit/build supports exactly the KSA build it was compiled and verified against. -->
+    <VerifiedKsaBuild>2026.7.6.4939</VerifiedKsaBuild>
+  </PropertyGroup>
+</Project>

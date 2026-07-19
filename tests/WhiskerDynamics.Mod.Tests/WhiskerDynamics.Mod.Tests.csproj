@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <KsaInstallDir Condition="'$(KsaInstallDir)' == '' and '$(KSA_INSTALL_DIR)' != ''">$(KSA_INSTALL_DIR)</KsaInstallDir>
+    <KsaInstallDir Condition="'$(KsaInstallDir)' == ''">C:\Program Files\Kitten Space Agency</KsaInstallDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- PatchValidator tests exercise test-local dummy types only; FrameAdapter tests
+         touch Brutal.Core.Numerics types but no KSA types, so of the game DLLs
+         (Private=false on the mod project) only the one below is needed at test time. -->
+    <ProjectReference Include="..\..\src\WhiskerDynamics.Mod\WhiskerDynamics.Mod.csproj" />
+    <ProjectReference Include="..\..\src\WhiskerDynamics.Compatibility\WhiskerDynamics.Compatibility.csproj" />
+    <!-- Copied locally (Private=true) so FrameAdapter runs without the game process.
+         Only this one game DLL is needed: FrameAdapter touches no KSA types. -->
+    <Reference Include="Brutal.Core.Numerics"><HintPath>$(KsaInstallDir)\Brutal.Core.Numerics.dll</HintPath><Private>true</Private></Reference>
+    <!-- Copied locally for the same reason: SettingsKernelTests round-trips whiskerdynamics.toml
+         through ModConfig.LoadOrCreate/SettingsPersistence (Tomlet, no KSA types). -->
+    <Reference Include="Tomlet"><HintPath>$(KsaInstallDir)\Tomlet.dll</HintPath><Private>true</Private></Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- UI panel reset tests execute the real session-sweep methods. Copy their
+         direct game/UI dependencies so those methods can run outside the game process. -->
+    <Reference Include='Brutal.ImGui.Abstractions'><HintPath>$(KsaInstallDir)/Brutal.ImGui.Abstractions.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include='Brutal.ImGui'><HintPath>$(KsaInstallDir)/Brutal.ImGui.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include='KSA'><HintPath>$(KsaInstallDir)/KSA.dll</HintPath><Private>true</Private></Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- RailsService third-body tests bind a fixture install dir with the same
+         Astronomicals sample WhiskerDynamics.Core.Tests uses (linked: single source of truth). -->
+    <None Include="..\WhiskerDynamics.Core.Tests\fixtures\Astronomicals.sample.xml"
+          Link="fixtures\Astronomicals.sample.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

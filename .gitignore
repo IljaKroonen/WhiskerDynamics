@@ -1,0 +1,8 @@
+bin/
+obj/
+decompiled/
+.vs/
+*.user
+BenchmarkDotNet.Artifacts/
+artifacts/
+StarMapConfig.json

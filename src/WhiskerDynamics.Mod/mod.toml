@@ -1,0 +1,4 @@
+name = "WhiskerDynamics"
+
+[StarMap]
+EntryAssembly = "WhiskerDynamics.Mod"

@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\WhiskerDynamics.GameTesting\WhiskerDynamics.GameTesting.csproj" />
+    <InternalsVisibleTo Include="WhiskerDynamics.GameTestHost.Tests" />
+  </ItemGroup>
+</Project>

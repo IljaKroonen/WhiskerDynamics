@@ -1,0 +1,16 @@
+global using WhiskerDynamics.Mod.Analysis;
+global using WhiskerDynamics.Mod.Configuration;
+global using WhiskerDynamics.Mod.Diagnostics;
+global using WhiskerDynamics.Mod.Frames;
+global using WhiskerDynamics.Mod.Overlay;
+global using WhiskerDynamics.Mod.Patches;
+global using WhiskerDynamics.Mod.Patching;
+global using WhiskerDynamics.Mod.Persistence;
+global using WhiskerDynamics.Mod.Planning;
+global using WhiskerDynamics.Mod.Planning.Periapsis;
+global using WhiskerDynamics.Mod.Planning.Rendezvous;
+global using WhiskerDynamics.Mod.Rails;
+global using WhiskerDynamics.Mod.Runtime;
+global using WhiskerDynamics.Mod.Soi;
+global using WhiskerDynamics.Mod.Ui;
+global using WhiskerDynamics.Mod.Vessels;

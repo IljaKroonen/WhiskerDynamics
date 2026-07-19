@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <KsaInstallDir Condition="'$(KsaInstallDir)' == '' and '$(KSA_INSTALL_DIR)' != ''">$(KSA_INSTALL_DIR)</KsaInstallDir>
+    <KsaInstallDir Condition="'$(KsaInstallDir)' == ''">C:\Program Files\Kitten Space Agency</KsaInstallDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>VerifiedKsaBuild</_Parameter1>
+      <_Parameter2>$(VerifiedKsaBuild)</_Parameter2>
+    </AssemblyAttribute>
+    <InternalsVisibleTo Include="WhiskerDynamics.Mod" />
+    <InternalsVisibleTo Include="WhiskerDynamics.Mod.Tests" />
+    <InternalsVisibleTo Include="WhiskerDynamics.Compatibility.Cli" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="KSA"><HintPath>$(KsaInstallDir)\KSA.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Brutal.Core.Common"><HintPath>$(KsaInstallDir)\Brutal.Core.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Brutal.Concurrency"><HintPath>$(KsaInstallDir)\Brutal.Concurrency.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Brutal.Core.Numerics"><HintPath>$(KsaInstallDir)\Brutal.Core.Numerics.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Brutal.Core.Strings"><HintPath>$(KsaInstallDir)\Brutal.Core.Strings.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Brutal.ImGui"><HintPath>$(KsaInstallDir)\Brutal.ImGui.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Brutal.ImGui.Abstractions"><HintPath>$(KsaInstallDir)\Brutal.ImGui.Abstractions.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="CommunityToolkit.HighPerformance"><HintPath>$(KsaInstallDir)\CommunityToolkit.HighPerformance.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <Target Name="VerifyKsaReferenceBuild" BeforeTargets="CoreCompile">
+    <GetAssemblyIdentity AssemblyFiles="$(KsaInstallDir)\KSA.dll">
+      <Output TaskParameter="Assemblies" ItemName="_KsaAssemblyIdentity" />
+    </GetAssemblyIdentity>
+    <Error Condition="'%(_KsaAssemblyIdentity.Version)' != '$(VerifiedKsaBuild)'"
+           Text="This commit supports KSA $(VerifiedKsaBuild), but $(KsaInstallDir)\KSA.dll is version %(_KsaAssemblyIdentity.Version). Update and verify VerifiedKsaBuild before compiling against another KSA build." />
+  </Target>
+</Project>

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <!-- Benchmarks exercise the real internal kernels instead of hand-kept mirrors;
+         tests cover internal prototypes (DormandPrince853). -->
+    <InternalsVisibleTo Include="WhiskerDynamics.Benchmarks" />
+    <InternalsVisibleTo Include="WhiskerDynamics.Core.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="WhiskerDynamics.Benchmarks.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WhiskerDynamics.Compatibility\WhiskerDynamics.Compatibility.csproj" />
+    <ProjectReference Include="..\WhiskerDynamics.Core\WhiskerDynamics.Core.csproj" />
+    <ProjectReference Include="..\WhiskerDynamics.Mod\WhiskerDynamics.Mod.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+  </ItemGroup>
+
+</Project>

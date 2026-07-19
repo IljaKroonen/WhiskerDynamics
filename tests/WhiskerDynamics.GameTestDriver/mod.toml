@@ -1,0 +1,5 @@
+name = "Whisker Dynamics Game Test Driver"
+
+[StarMap]
+EntryAssembly = "WhiskerDynamics.GameTestDriver"
+ModDependencies = [{ ModId = "WhiskerDynamics", ImportedAssemblies = ["WhiskerDynamics.Mod", "WhiskerDynamics.Core"] }]
