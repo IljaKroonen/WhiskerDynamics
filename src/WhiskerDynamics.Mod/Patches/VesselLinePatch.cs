@@ -188,7 +188,6 @@ internal static class VesselLinePatch
                 samples.DensePositionsCce, samples.DenseFrameCoordinates,
                 samples.DenseMetrics, samples.DenseMetricsCce, in context,
                 stage.Color, positionEgo, nowSimSeconds,
-                stylePastTrajectory: true,
                 bypassVisibilityCheck: bypassVisibility);
         }
 

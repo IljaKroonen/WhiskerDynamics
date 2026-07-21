@@ -913,7 +913,7 @@ public static class BurnPlannerPanel
         }
         if (plan.Diverged)
             ImGui.TextWrapped(
-                "Plan diverged from the flown trajectory; rebase to re-anchor it.");
+                "Plan diverged from the actual trajectory; rebase to re-anchor it.");
 
         ImGui.Spacing();
         ImGui.SeparatorText("Propulsion"u8);

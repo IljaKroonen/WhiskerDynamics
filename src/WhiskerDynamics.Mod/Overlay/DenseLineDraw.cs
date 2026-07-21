@@ -18,9 +18,7 @@ namespace WhiskerDynamics.Mod.Overlay;
 /// splice vertex at full opacity, and the index-based opacity fade with its 0.5
 /// floor — anchored at "now" even for splice-less lines (stock computes the
 /// insertion index and fades from it regardless of whether a current position was
-/// passed, Orbit.cs:2102-2160/2218-2226). Actual-vessel lines can additionally mute
-/// samples at or behind now, making flown history a subdued trail while the future
-/// remains the bright stock-colored path. The staged 2000-point buffer remains the
+/// passed, Orbit.cs:2102-2160/2218-2226). The staged 2000-point buffer remains the
 /// payload surface for stock readers — this pass is DRAW only.</summary>
 internal static class DenseLineDraw
 {
@@ -41,8 +39,6 @@ internal static class DenseLineDraw
     /// — the zoom dolly reshuffles the emitted subset every frame, and a
     /// sub-pixel-bounded reshuffle is what keeps the line from visibly crawling.</summary>
     private const double DeviationBudgetPixels = 0.4;
-
-    private const byte PastTrajectoryAlpha = 88;
 
     /// <summary>The one emit path (splice vertex and samples share it): buffers into
     /// the caller's stack chunk and flushes full chunks — a ref struct because local
@@ -85,7 +81,6 @@ internal static class DenseLineDraw
         in TrajectoryOverlay.StagingContext ctx, byte4 color,
         double3 currentPositionEgo, double nowSeconds, bool fadeOpacity = true,
         double minimumTimeSeconds = double.NegativeInfinity,
-        bool stylePastTrajectory = false,
         bool bypassVisibilityCheck = false)
     {
         if (!Program.DrawUI) return; // stock's own early-out (Orbit.cs:2079): the sink
@@ -226,7 +221,7 @@ internal static class DenseLineDraw
                 ? parentEgo + FrameAdapter.ToGame(ctx.Drawn(default, framePositions![first]))
                 : inertialBase + FrameAdapter.ToGame(positions[first]);
             var vertexColor = StyledColor(
-                color, first, nowIndex, invFadeCount, fadeOpacity, stylePastTrajectory);
+                color, first, nowIndex, invFadeCount, fadeOpacity);
             emitter.Emit(float3.Pack(in world), vertexColor);
             lastEmitArc = arcCum[first];
             thresholdSampled = TargetPixelsPerVertex * world.Length() / (pxPerRadian * arcScale);
@@ -250,7 +245,7 @@ internal static class DenseLineDraw
                 ? parentEgo + FrameAdapter.ToGame(ctx.Drawn(default, framePositions![i]))
                 : inertialBase + FrameAdapter.ToGame(positions[i]);
             var vertexColor = StyledColor(
-                color, i, nowIndex, invFadeCount, fadeOpacity, stylePastTrajectory);
+                color, i, nowIndex, invFadeCount, fadeOpacity);
             emitter.Emit(float3.Pack(in world), vertexColor);
             lastEmitArc = arcCum[i];
             // Distance-adaptive thresholds: re-anchored at each emitted vertex, so
@@ -263,18 +258,8 @@ internal static class DenseLineDraw
     }
 
     internal static byte4 StyledColor(byte4 color, int sampleIndex, int nowIndex,
-        float invFadeCount, bool fadeOpacity, bool stylePastTrajectory)
+        float invFadeCount, bool fadeOpacity)
     {
-        if (stylePastTrajectory && (nowIndex < 0 || sampleIndex < nowIndex))
-        {
-            int luminance = (54 * color.R + 183 * color.G + 19 * color.B + 128) >> 8;
-            color.R = (byte)((color.R + 2 * luminance) / 3);
-            color.G = (byte)((color.G + 2 * luminance) / 3);
-            color.B = (byte)((color.B + 2 * luminance) / 3);
-            color.A = Math.Min(color.A, PastTrajectoryAlpha);
-            return color;
-        }
-
         if (!fadeOpacity) return color;
         float fade = 1f - (sampleIndex - nowIndex) * invFadeCount;
         if (sampleIndex < nowIndex) fade -= 1f;

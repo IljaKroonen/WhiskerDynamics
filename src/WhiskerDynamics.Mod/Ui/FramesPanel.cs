@@ -8,7 +8,7 @@ namespace WhiskerDynamics.Mod.Ui;
 /// (restore the last-activated frame, else FrameSelectorKernel.DefaultFrame).
 /// The panel also owns the session-only "show orbits this far ahead" control, applied
 /// through SettingsKernel.ApplyPrediction. It starts at 30 days on every process launch.
-/// The history window and line-visibility policy are game-local controls.
+/// The line-visibility policy is a game-local control.
 /// How far ahead positions are
 /// COMPUTED is implicit: the rails horizon follows the display window both ways within
 /// the preset range (SettingsKernel.EditPrediction), with catch-up progress surfaced in
@@ -31,7 +31,6 @@ public static class FramesPanel
         _errors = 0;
         _status = "";
         _firstDrawLogged = false;
-        InvalidateHistoryCoverageReadout();
         _horizonReadout = "";
         _horizonReadoutMs = 0;
         _trajectoryProgress = null;
@@ -61,7 +60,6 @@ public static class FramesPanel
                     ImGui.Spacing();
                     ImGui.SeparatorText("Map trajectories"u8);
                     DrawHorizonRow(ModServices.Config, services.Rails, active);
-                    DrawHistoryRows();
                     DrawLinePolicyRow();
                     DrawPotentialRow(active);
 
@@ -257,108 +255,6 @@ public static class FramesPanel
         {
             ImGui.EndTable();
         }
-    }
-
-    private static readonly (double Step, string Minus, string Plus)[] HistoryDisplaySteps =
-        [(3600.0, "-1h", "+1h"), (86400.0, "-1d", "+1d"), (7 * 86400.0, "-7d", "+7d")];
-    private static string _historyCoverageReadout = "";
-    private static long _historyCoverageReadoutMs;
-
-    internal static void InvalidateHistoryCoverageReadout()
-    {
-        _historyCoverageReadout = "";
-        _historyCoverageReadoutMs = 0;
-    }
-
-    internal static bool TryBeginHistoryCoverageRefresh(long nowMs)
-    {
-        if (!ReadoutRefreshDue(_historyCoverageReadoutMs, nowMs)) return false;
-        _historyCoverageReadoutMs = nowMs;
-        return true;
-    }
-
-    private static void DrawHistoryRows()
-    {
-        double display = ModServices.MapTrajectory.HistoryDisplayDays * ModConfig.SecondsPerDay;
-        if (!UiLayout.BeginProperties("##history-property"u8,
-                UiTheme.PropertyLabelWidth)) return;
-        try
-        {
-            UiLayout.NextProperty("Past trajectory");
-            if (DurationField.Row("##historydisplay"u8, "past trajectory", 0,
-                    ref display, HistoryDisplaySteps, out string? displayError, years: true))
-            {
-                display = Math.Clamp(display, 0.0, FlownHistorySettings.DefaultRetentionSeconds);
-                ModServices.MapTrajectory.HistoryDisplayDays = display / ModConfig.SecondsPerDay;
-                InvalidateHistoryCoverageReadout();
-                _status = display == 0
-                    ? "past trajectory hidden"
-                    : $"past trajectory {TimeDisplayKernel.FormatDuration(display, years: true)}";
-            }
-            if (displayError is not null) _status = displayError;
-            ImGui.SetItemTooltip("how much of the trajectory already flown is shown for this game; enter 0 to hide it without stopping the session recording; clamps to [0, 40y]"u8);
-        }
-        finally
-        {
-            ImGui.EndTable();
-        }
-        DrawHistoryCoverage();
-    }
-
-    private static void DrawHistoryCoverage()
-    {
-        double displaySeconds =
-            ModServices.MapTrajectory.HistoryDisplayDays * ModConfig.SecondsPerDay;
-        if (!(displaySeconds > 0)) return;
-        long nowMs = Environment.TickCount64;
-        if (TryBeginHistoryCoverageRefresh(nowMs))
-        {
-            string? vesselId = KSA.Program.ControlledVehicle?.Id;
-            OverlaySamples? samples = vesselId is null ? null : OverlayBuffer.Read(vesselId);
-            _historyCoverageReadout = HistoryCoverageText(samples, displaySeconds);
-        }
-        if (_historyCoverageReadout.Length > 0)
-            ImGui.TextWrapped(_historyCoverageReadout);
-    }
-
-    internal static string HistoryCoverageText(
-        OverlaySamples? samples, double displaySeconds)
-    {
-        if (samples is null || samples.HistoryDisplaySeconds != displaySeconds)
-            return "";
-        return HistoryCoverageText(
-            samples.SampleT0,
-            displaySeconds,
-            samples.HistoryRequestedStartSeconds,
-            samples.HistoryOldestRecordedStartSeconds,
-            samples.HistoryOldestRenderedStartSeconds,
-            samples.HistoryRenderBudgetTruncated);
-    }
-
-    internal static string HistoryCoverageText(
-        double sampleT0,
-        double displaySeconds,
-        double requestedStartSeconds,
-        double? oldestRecordedStartSeconds,
-        double? oldestRenderedStartSeconds,
-        bool renderBudgetTruncated)
-    {
-        if (renderBudgetTruncated && oldestRenderedStartSeconds is { } renderedStart)
-        {
-            double rendered = Math.Max(0, sampleT0 - renderedStart);
-            return $"showing {TimeDisplayKernel.FormatDuration(rendered, years: true)} "
-                + $"of requested {TimeDisplayKernel.FormatDuration(displaySeconds, years: true)} "
-                + "— trajectory point limit reached";
-        }
-        if (oldestRecordedStartSeconds is not { } recordedStart)
-            return "recorded history available: 0s";
-        if (recordedStart > requestedStartSeconds)
-        {
-            double recorded = Math.Max(0, sampleT0 - recordedStart);
-            return $"recorded history available: "
-                + TimeDisplayKernel.FormatDuration(recorded, years: true);
-        }
-        return "";
     }
 
     private static void ApplyHorizon(ModConfig config, double days)

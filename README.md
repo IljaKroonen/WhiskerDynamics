@@ -16,7 +16,7 @@ game running stock.
 
 - N-body celestial and vessel propagation, including Earth J2 and configurable
   Luna gravity harmonics.
-- Sampled celestial, actual, planned, and flown paths with event markers, orbit
+- Sampled celestial, actual, and planned paths with event markers, orbit
   analysis, and selectable reference frames.
 - Finite-burn plan prediction, maneuver optimization, and automatic rendezvous
   searches.

@@ -155,12 +155,6 @@ public sealed class TrackedVessel
     /// call this: it may race a newer producer's reservation.</summary>
     internal void CancelOverlayRebuild() => Volatile.Write(ref _overlayCaptureReserved, 0);
 
-    /// <summary>Downsampled positions the vessel has actually passed, held in
-    /// mod-absolute coordinates so display-frame and SOI changes can re-embed the
-    /// retained trail. Live physics and OverlayWorker may both contribute; the
-    /// history store serializes them internally.</summary>
-    internal FlownHistory FlownHistory { get; } = new();
-
     /// <summary>Burns folded into this vessel's last overlay rebuild; -1 = no rebuild
     /// yet for this entry (per-vessel rather than a TrajectoryOverlay static — the
     /// state dies with the registry on rebind, no session sweep needed).</summary>
