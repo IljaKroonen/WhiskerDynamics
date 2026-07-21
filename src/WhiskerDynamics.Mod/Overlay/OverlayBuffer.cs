@@ -43,8 +43,8 @@ public sealed record OverlaySamples
 {
     public required string VesselId { get; init; }
     public required double SampleT0 { get; init; }
-    /// <summary>Epoch of the future sweep before retained history was prepended.
-    /// Unlike SampleT0 this survives geometry reuse and therefore drives its age cap.</summary>
+    /// <summary>Epoch of the sampled sweep. Unlike SampleT0 this survives geometry
+    /// reuse and therefore drives its age cap.</summary>
     public required double FutureStartSeconds { get; init; }
     public required long SampleWallMs { get; init; }
     /// <summary>Universe simulation epoch read by the producer during this rebuild's
@@ -92,12 +92,6 @@ public sealed record OverlaySamples
     /// its true numerical coverage while branch continuity uses the visible impact
     /// endpoint.</summary>
     public double CoverageEndSeconds { get; init; } = double.NaN;
-    public required double HistoryDisplaySeconds { get; init; }
-    public required double HistoryRequestedStartSeconds { get; init; }
-    public required double? HistoryOldestRecordedStartSeconds { get; init; }
-    public required double? HistoryOldestRenderedStartSeconds { get; init; }
-    public required bool HistoryRenderBudgetTruncated { get; init; }
-    public required int HistoryPointCount { get; init; }
     /// <summary>Honest line markers for this batch (first upcoming Ap/Pe per
     /// frame-relevant body + AN/DN vs the mode's natural plane) — see
     /// TrajectoryOverlay's marker computation. Empty when none resolved.</summary>

@@ -1170,10 +1170,6 @@ public class OverlayBufferTests
         Times = [0.0], TimesSincePe = [0.0], RemainingTimesTo = [0.0],
         PositionsCce = [default], ParentId = "Terra", PointCount = 1, Truncated = false,
         HorizonSeconds = 0, SamplingThetaMax = 0.01, SamplingMaxDensePoints = 2000,
-        HistoryDisplaySeconds = 0, HistoryRequestedStartSeconds = 0,
-        HistoryOldestRecordedStartSeconds = null,
-        HistoryOldestRenderedStartSeconds = null,
-        HistoryRenderBudgetTruncated = false, HistoryPointCount = 0,
         Markers = [], DenseTimes = [100.0, 1000.0],
         DensePositionsCce = [default, default],
         DenseMetrics = DecimationMetrics.For([default, default]),
@@ -1197,16 +1193,6 @@ public class OverlayBufferTests
         Assert.Contains("planned arc truncated", capNote);
     }
 
-    [Fact]
-    public void History_display_duration_is_rendered_geometry_identity()
-    {
-        var batch = Batch("a") with { HistoryDisplaySeconds = 30 * 86400.0 };
-
-        Assert.True(TrajectoryOverlay.HistoryDisplayMatches(
-            batch, 30 * 86400.0));
-        Assert.False(TrajectoryOverlay.HistoryDisplayMatches(
-            batch, 31 * 86400.0));
-    }
     [Fact]
     public void Planned_restamp_refreshes_epoch_fields_and_reuses_geometry_references()
     {

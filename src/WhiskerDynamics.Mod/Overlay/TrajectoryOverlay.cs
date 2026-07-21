@@ -34,7 +34,6 @@ namespace WhiskerDynamics.Mod.Overlay;
 /// let alone throw into the game.</summary>
 public static class TrajectoryOverlay
 {
-    internal const int HistoryRenderPointLimit = 32_768;
     private const long RebuildPeriodMs = 1000;
     /// <summary>Floor on plan-edit bypass frequency: single edits still feel instant,
     /// while a continuously mutating plan (a stock-editor drag whose reconcile
@@ -171,9 +170,6 @@ public static class TrajectoryOverlay
         return actual + planned;
     }
 
-    internal static bool HistoryDisplayMatches(
-        OverlaySamples samples, double displaySeconds) =>
-        samples.HistoryDisplaySeconds == displaySeconds;
     /// <summary>Called from the Seam 1 postfixes (single-vessel and cluster-follower)
     /// after the predictor state was staged. Every caller-supplied tracked vessel
     /// rebuilds with one queued/running pass per vessel and completion-aware cooldown.
@@ -305,9 +301,7 @@ public static class TrajectoryOverlay
             if (!tracked.TryBeginOverlayRebuild(nowMs, RebuildPeriodMs,
                     contextChanged || planChanged || analysisLoopDue)) return;
             reserved = true;
-            double captureFrom = HistoryPredictionStart(
-                tracked, t0,
-                ModServices.MapTrajectory.HistoryDisplayDays * ModConfig.SecondsPerDay);
+            double captureFrom = t0;
             var planState = plan?.SnapshotState.Snapshot;
             if (planState is not null) captureFrom = Math.Min(captureFrom, planState.EpochSeconds);
             var prediction = tracked.Rails.TryCapturePredictionContext(captureFrom, horizon);
@@ -481,7 +475,6 @@ public static class TrajectoryOverlay
             var sv = vehicleState.CurrentStateVectors; // live post-physics state
             double t0 = sv.StateTime.Seconds();
             var analysisRequest = CaptureAnalysisRequest(vehicleState.Id);
-            CapturePhysicsHistory(tracked, currentOrbit, in sv, t0);
             long editStamp = FlightPlans.EditStamp;
             FlightPlanModel? plan = FlightPlans.TryGet(vehicleState.Id);
             // Clamped to the rails horizon actually reached, like the on-rails path.
@@ -495,9 +488,7 @@ public static class TrajectoryOverlay
             if (horizon <= t0) return;
             if (!tracked.TryBeginContinuousOverlayRebuild()) return;
             reserved = true;
-            double captureFrom = HistoryPredictionStart(
-                tracked, t0,
-                ModServices.MapTrajectory.HistoryDisplayDays * ModConfig.SecondsPerDay);
+            double captureFrom = t0;
             var planState = plan?.SnapshotState.Snapshot;
             if (planState is not null) captureFrom = Math.Min(captureFrom, planState.EpochSeconds);
             var prediction = tracked.Rails.TryCapturePredictionContext(captureFrom, horizon);
@@ -599,34 +590,6 @@ public static class TrajectoryOverlay
         }
     }
 
-    /// <summary>Observed live-physics positions do not wait for a full-window overlay
-    /// rebuild. Full physics changes coast lineage every tick, so future geometry
-    /// cannot be harvested as history; retaining committed truth here keeps the flown
-    /// curve resolved through burns, drag, and physics-bubble coasts.</summary>
-    private static void CapturePhysicsHistory(TrackedVessel tracked, Orbit currentOrbit,
-        in StateVectors sv, double timeSeconds)
-    {
-        var settings = FlownHistorySettings.Default;
-        var history = tracked.FlownHistory;
-        history.Configure(timeSeconds, in settings);
-        if (!history.Wants(timeSeconds, timeSeconds, in settings)) return;
-        var absolute = tracked.AbsoluteFromGameState(currentOrbit, in sv);
-        history.Append(timeSeconds, absolute.Position, timeSeconds, in settings);
-    }
-
-    internal static double HistoryPredictionStart(
-        TrackedVessel tracked, double nowSeconds, double displaySeconds)
-    {
-        double oldest = tracked.FlownHistory.OldestTimeSeconds;
-        double displayStart = displaySeconds > 0 && double.IsFinite(oldest)
-            ? Math.Max(nowSeconds - displaySeconds, oldest)
-            : nowSeconds;
-        double latest = tracked.FlownHistory.LatestTimeSeconds;
-        return double.IsFinite(latest)
-            ? Math.Min(displayStart, latest)
-            : displayStart;
-    }
-
     private static int _liveLogged;      // one-shot: first off-rails live rebuild
     private static int _collisionLogged; // one-shot: first surface-frame collision cut
 
@@ -716,22 +679,20 @@ public static class TrajectoryOverlay
                 // every vertex along the same path, which can make the chords crawl
                 // at close zoom. While the
                 // predictor lineage is continuous and the context unchanged, the
-                // the previous batch's future vertices are retained while its bounded
-                // history prefix and now-anchored payloads are refreshed; an age cap
-                // forces a real resample before the vessel outruns its dense near
-                // window or the horizon slides visibly short.
+                // previous batch's future vertices are retained while its now-anchored
+                // payloads are refreshed; an age cap forces a real resample before the
+                // vessel outruns its dense near window or the horizon slides visibly short.
                 var (display, continuous) = DisplayFactory();
                 StateVector anchorState = CurrentAnchor();
                 double periodHint = Scope.PeriodHintAt(display, Scope.T0, anchorState);
                 var previous = OverlayBuffer.Read(VesselId);
-                Scope.CaptureFlownHistory(display, previous, continuous, anchorState);
                 var reusable = OffRails ? null : previous;
                 var samples = continuous && reusable is not null
                     && Scope.CanReuseActual(reusable, periodHint)
                         ? Scope.ReuseActualBatch(
                             reusable, display, CaptureSimSeconds, Obsolete)
                         : Scope.SampleBatch(display, Scope.T0, periodHint, CaptureSimSeconds,
-                            includeFlownHistory: true, includeAnalysis: Scope.AnalysisWorkEnabled,
+                            includeAnalysis: Scope.AnalysisWorkEnabled,
                             shouldStop: Obsolete,
                             anchorStateOverride: anchorState);
                 if (Obsolete()) return;
@@ -853,7 +814,6 @@ public static class TrajectoryOverlay
             foreach (var marker in samples.Markers)
                 if (marker.Kind == OverlayMarkerKind.Collision) { impact = marker; break; }
             LastNote = $"overlay: {samples.DenseTimes.Length} pts"
-                + $" ({samples.HistoryPointCount} flown)"
                 + $" ({samples.PointCount} staged){capNote}"
                 + $"{(impact is not null ? " (cut at surface impact)" : "")}, "
                 + $"{burnsApplied} burns{(OverlayBuffer.ReadPlanned(VesselId) is not null ? " (planned line on)" : "")}, "
@@ -1354,12 +1314,9 @@ public static class TrajectoryOverlay
         // IGNITION — still the pre-burn period, a deliberate conservative hint that
         // can only force more samples.
         double hintTime = Math.Min(sampleStart + 1.0, plannedHorizon);
-        // Planned geometry starts at its burn/ghost window. Flown history belongs
-        // exclusively to the actual line; including it here would redraw reality's
-        // past in the planned-burn color and freeze that prefix through restamps.
         var batch = scope.SampleBatch(planned, sampleStart, scope.PeriodHintAt(planned, hintTime),
             actualSamples.CaptureSimSeconds,
-            includeFlownHistory: false, includeAnalysis: false,
+            includeAnalysis: false,
             shouldStop: shouldStop, horizonOverride: plannedHorizon);
         if (shouldStop()) throw new OperationCanceledException();
         if (!publishIfCurrent(() => OverlayBuffer.PublishPlanned(batch)))
@@ -1497,8 +1454,6 @@ public static class TrajectoryOverlay
         /// clamped): the drawn polyline's cap; the staged stock buffer is a decimated
         /// subset (<see cref="OverlayKernel.DecimateIndices"/>).</summary>
         public required int MaxDensePoints { get; init; }
-        public required FlownHistorySettings HistorySettings { get; init; }
-        public required double HistoryDisplaySeconds { get; init; }
         // Finite-burn discretization knobs (config; slice seconds <= 0 = feature off).
         public required double FiniteBurnSliceSeconds { get; init; }
         public required int FiniteBurnMaxSlices { get; init; }
@@ -1574,9 +1529,6 @@ public static class TrajectoryOverlay
                         Math.Max(0.0, (plan.EndSeconds - t0) / 86400.0)),
                 MaxDensePoints = Math.Clamp(config.OverlayMaxPoints,
                     OverlayKernel.StockPointBufferLength, 262144),
-                HistorySettings = FlownHistorySettings.Default,
-                HistoryDisplaySeconds =
-                    ModServices.MapTrajectory.HistoryDisplayDays * ModConfig.SecondsPerDay,
                 FiniteBurnSliceSeconds = config.FiniteBurnSliceSeconds,
                 FiniteBurnMaxSlices =
                     OverlayKernel.OverlayFiniteBurnMaxSlices(config.FiniteBurnMaxSlices),
@@ -1608,44 +1560,6 @@ public static class TrajectoryOverlay
                 state.Position - parentAbs.Position, state.Velocity - parentAbs.Velocity);
         }
 
-        /// <summary>Advances the retained ACTUAL trail. On a continuous coast, points
-        /// already sampled in the prior future batch are harvested up to now; this
-        /// preserves detail when high warp advances simulation time much faster than
-        /// the one-wall-second rebuild cadence. A discontinuity contributes only its
-        /// observed current position (live-physics rebuilds do the same), so predicted
-        /// geometry is never retained across a changed coast.</summary>
-        public void CaptureFlownHistory(TrajectoryPredictor predictor, OverlaySamples? previous,
-            bool continuous, StateVector? currentState = null)
-        {
-            var history = Tracked.FlownHistory;
-            var settings = HistorySettings;
-            history.Configure(T0, in settings);
-
-            if (continuous && previous is not null)
-            {
-                for (int i = 0; i < previous.DenseTimes.Length; i++)
-                {
-                    double t = previous.DenseTimes[i];
-                    if (t > T0) break;
-                    if (!history.Wants(t, T0, in settings)) continue;
-                    var parent = Prediction.GetAbsolute(previous.ParentId, t);
-                    history.Append(t, previous.DensePositionsCce[i] + parent.Position,
-                        T0, in settings);
-                }
-            }
-
-            StateVector current;
-            if (currentState is { } known)
-                current = known;
-            else
-                current = predictor.StateAt(T0);
-            history.Append(T0, current.Position, T0, in settings);
-        }
-
-        /// <summary>Age cap on actual-batch sample reuse (seconds): a real resample
-        /// runs at least this often, so the sampled future never falls behind the
-        /// vessel and the horizon never slides visibly short of the configured
-        /// window.</summary>
         /// <summary>Whether the previous published actual batch's GEOMETRY is still
         /// the truth this rebuild would resample (caller already established the
         /// predictor lineage is continuous): same frame mode and SOI parent, no
@@ -1653,17 +1567,15 @@ public static class TrajectoryOverlay
         /// frame (its coordinates depend on another mutable predictor), and young
         /// enough that the sampled future still leads the vessel and the batch
         /// end still hugs the sliding horizon. Reuse keeps the sampled future
-        /// vertices while refreshing the bounded past prefix.</summary>
+        /// vertices while refreshing every now-anchored payload.</summary>
         public bool CanReuseActual(OverlaySamples previous, double periodHint)
         {
             if (!OverlayKernel.FrameAllowsGeometryReuse(ActiveFrame)) return false;
             if (!OverlayKernel.ModeMatches(previous.FrameLabel, ActiveFrame?.Label)) return false;
             if (!string.Equals(previous.ParentId, ParentBodyId, StringComparison.Ordinal)) return false;
             if (AnalysisWorkEnabled != previous.AnalysisRequested) return false;
-            if (!HistoryDisplayMatches(previous, HistoryDisplaySeconds)) return false;
             if (previous.SamplingThetaMax != ThetaMax
                 || previous.SamplingMaxDensePoints != MaxDensePoints) return false;
-            if (previous.FutureStartSeconds < T0 - HistoryDisplaySeconds) return false;
             if (previous.DenseTimes.Length < 2) return false;
             foreach (var marker in previous.Markers)
                 if (marker.Kind == OverlayMarkerKind.Collision) return false;
@@ -1693,61 +1605,33 @@ public static class TrajectoryOverlay
             return previous.DenseTimes[^1] > T0 + 1.0; // any future line left at all
         }
 
-        /// <summary>Reuses the still-future sampled vertices while rebuilding the
-        /// bounded history prefix and every now-anchored payload.</summary>
+        /// <summary>Reuses the still-future sampled vertices while refreshing every
+        /// now-anchored payload.</summary>
         public OverlaySamples ReuseActualBatch(
             OverlaySamples previous, TrajectoryPredictor predictor,
             double captureSimSeconds, Func<bool>? shouldStop = null)
         {
-            double requestedStart = T0 - HistoryDisplaySeconds;
-            FlownHistorySnapshot historySnapshot = Tracked.FlownHistory.SnapshotRange(
-                requestedStart, T0, HistoryRenderPointLimit);
-            FlownSample[] history = historySnapshot.Samples;
-            int historyCount = history.Length;
             StateVector anchor = StateAt(predictor, T0);
             Vector3d parentNow = Prediction.GetAbsolute(ParentBodyId, T0).Position;
             Vector3d currentCce = anchor.Position - parentNow;
 
-            int oldFutureStart = previous.HistoryPointCount;
+            int oldFutureStart = 0;
             while (oldFutureStart < previous.DenseTimes.Length
                 && previous.DenseTimes[oldFutureStart] <= T0)
                 oldFutureStart++;
             int futureCount = 1 + previous.DenseTimes.Length - oldFutureStart;
-            int denseCount = historyCount + futureCount;
-            var denseTimes = new double[denseCount];
-            var densePositionsCce = new Vector3d[denseCount];
-            for (int i = 0; i < historyCount; i++)
-            {
-                denseTimes[i] = history[i].TimeSeconds;
-                var parent = Prediction.GetAbsolute(ParentBodyId, history[i].TimeSeconds);
-                densePositionsCce[i] = history[i].AbsolutePosition - parent.Position;
-            }
-            denseTimes[historyCount] = T0;
-            densePositionsCce[historyCount] = currentCce;
+            var denseTimes = new double[futureCount];
+            var densePositionsCce = new Vector3d[futureCount];
+            denseTimes[0] = T0;
+            densePositionsCce[0] = currentCce;
             Array.Copy(previous.DenseTimes, oldFutureStart,
-                denseTimes, historyCount + 1, futureCount - 1);
+                denseTimes, 1, futureCount - 1);
             Array.Copy(previous.DensePositionsCce, oldFutureStart,
-                densePositionsCce, historyCount + 1, futureCount - 1);
+                densePositionsCce, 1, futureCount - 1);
 
             Vector3d[]? denseCoordinates = previous.DenseFrameCoordinates is null
                 ? null
-                : new Vector3d[denseCount];
-            if (denseCoordinates is not null)
-            {
-                for (int i = 0; i < historyCount; i++)
-                {
-                    if (!FrameManager.TrySamplePoseForCurve(FrameSnapshot!.Value,
-                            Prediction, Target?.StateAt, history[i].TimeSeconds, out var pose))
-                    {
-                        denseCoordinates = null;
-                        break;
-                    }
-                    var root = Prediction.GetAbsolute(
-                        Prediction.RootId, history[i].TimeSeconds);
-                    denseCoordinates[i] =
-                        pose.ToFrame(history[i].AbsolutePosition - root.Position);
-                }
-            }
+                : new Vector3d[futureCount];
             if (denseCoordinates is not null)
             {
                 if (!FrameManager.TrySamplePoseForCurve(FrameSnapshot!.Value,
@@ -1758,10 +1642,10 @@ public static class TrajectoryOverlay
                 else
                 {
                     var root = Prediction.GetAbsolute(Prediction.RootId, T0);
-                    denseCoordinates[historyCount] =
+                    denseCoordinates[0] =
                         currentPose.ToFrame(anchor.Position - root.Position);
                     Array.Copy(previous.DenseFrameCoordinates!, oldFutureStart,
-                        denseCoordinates, historyCount + 1, futureCount - 1);
+                        denseCoordinates, 1, futureCount - 1);
                 }
             }
 
@@ -1769,7 +1653,7 @@ public static class TrajectoryOverlay
             var futurePositionsCce = new List<Vector3d> { currentCce };
             List<Vector3d>? futureCoordinates = denseCoordinates is null
                 ? null
-                : [denseCoordinates[historyCount]];
+                : [denseCoordinates[0]];
             for (int i = 0; i < previous.PointCount; i++)
             {
                 if (previous.Times[i] <= T0) continue;
@@ -1820,15 +1704,6 @@ public static class TrajectoryOverlay
                 RemainingTimesTo = OverlayKernel.PadToStockLength(remaining),
                 PositionsCce = OverlayKernel.PadToStockLength(positionsCce),
                 PointCount = count,
-                HistoryRequestedStartSeconds =
-                    historySnapshot.Coverage.RequestedStartSeconds,
-                HistoryOldestRecordedStartSeconds =
-                    historySnapshot.Coverage.OldestRecordedStartSeconds,
-                HistoryOldestRenderedStartSeconds =
-                    historySnapshot.Coverage.OldestRenderedStartSeconds,
-                HistoryRenderBudgetTruncated =
-                    historySnapshot.Coverage.RenderBudgetTruncated,
-                HistoryPointCount = historyCount,
                 Markers = markers,
                 MarkerCandidates = candidates,
                 MarkerCacheKey = markerKey,
@@ -2008,7 +1883,7 @@ public static class TrajectoryOverlay
         /// sample.</summary>
         public OverlaySamples SampleBatch(TrajectoryPredictor predictor, double start,
             double periodHint, double captureSimSeconds,
-            bool includeFlownHistory, bool includeAnalysis, Func<bool>? shouldStop = null,
+            bool includeAnalysis, Func<bool>? shouldStop = null,
             StateVector? anchorStateOverride = null, double? horizonOverride = null)
         {
             includeAnalysis &= Ui.OrbitAnalyserPanel.RequestMatches(AnalysisRequestVersion);
@@ -2131,49 +2006,9 @@ public static class TrajectoryOverlay
                         : sweepPositions[i];
             }
 
-            // Retained flown prefix: absolute samples are converted to this batch's
-            // parent-relative Cce and, when active, the same per-sample frame
-            // coordinates as the future sweep. It feeds only the dense path; the
-            // stock-shaped pick/click buffer below remains future-budgeted.
-            double historyRequestedStart = T0 - HistoryDisplaySeconds;
-            FlownHistorySnapshot historySnapshot = includeFlownHistory && auxiliaryWorkAllowed
-                ? Tracked.FlownHistory.SnapshotRange(
-                    historyRequestedStart, start, HistoryRenderPointLimit)
-                : new([], new(historyRequestedStart, null, null, false));
-            var history = historySnapshot.Samples;
-            var historyCoverage = historySnapshot.Coverage;
-            int historyCount = history.Length;
-            int denseCount = historyCount + futureCount;
-            var denseTimes = new double[denseCount];
-            var densePositionsCce = new Vector3d[denseCount];
-            Array.Copy(futureTimes, 0, denseTimes, historyCount, futureCount);
-            Array.Copy(futurePositionsCce, 0, densePositionsCce, historyCount, futureCount);
-            Vector3d[]? denseCoordinates = futureCoordinates is null ? null : new Vector3d[denseCount];
-            if (denseCoordinates is not null)
-                Array.Copy(futureCoordinates!, 0, denseCoordinates, historyCount, futureCount);
-            for (int i = 0; i < historyCount; i++)
-            {
-                var retained = history[i];
-                denseTimes[i] = retained.TimeSeconds;
-                var parent = Prediction.GetAbsolute(ParentBodyId, retained.TimeSeconds);
-                densePositionsCce[i] = retained.AbsolutePosition - parent.Position;
-                if (denseCoordinates is not null)
-                {
-                    if (FrameManager.TrySamplePoseForCurve(FrameSnapshot!.Value,
-                            Prediction, Target?.StateAt, retained.TimeSeconds, out var pose))
-                    {
-                        var root = Prediction.GetAbsolute(Prediction.RootId, retained.TimeSeconds);
-                        denseCoordinates[i] = pose.ToFrame(retained.AbsolutePosition - root.Position);
-                    }
-                    else
-                    {
-                        // One pose failure degrades the whole immutable batch to its
-                        // consistent inertial Cce representation, like the future sweep.
-                        denseCoordinates = null;
-                    }
-                }
-            }
-
+            var denseTimes = futureTimes;
+            var densePositionsCce = futurePositionsCce;
+            Vector3d[]? denseCoordinates = futureCoordinates;
             // Decimated stock-shaped subset: every stock reader (hover job payload
             // lerp, click payloads, ground track) keeps exactly the stock-budget cost.
             var indices = OverlayKernel.DecimateIndices(futureCount, OverlayKernel.StockPointBufferLength);
@@ -2249,16 +2084,6 @@ public static class TrajectoryOverlay
                 SamplingThetaMax = ThetaMax,
                 SamplingMaxDensePoints = MaxDensePoints,
                 CoverageEndSeconds = sampled.Times[^1],
-                HistoryDisplaySeconds = HistoryDisplaySeconds,
-                HistoryRequestedStartSeconds =
-                    historyCoverage.RequestedStartSeconds,
-                HistoryOldestRecordedStartSeconds =
-                    historyCoverage.OldestRecordedStartSeconds,
-                HistoryOldestRenderedStartSeconds =
-                    historyCoverage.OldestRenderedStartSeconds,
-                HistoryRenderBudgetTruncated =
-                    historyCoverage.RenderBudgetTruncated,
-                HistoryPointCount = historyCount,
                 Markers = markers,
                 MarkerCandidates = markerCandidates,
                 MarkerCacheKey = this.MarkerCacheKey,
@@ -2313,12 +2138,9 @@ public static class TrajectoryOverlay
             string primary = activeFrame?.PrimaryId ?? parentId;
             string? secondary = activeFrame?.Kind == FrameKind.TwoBodyFixed ? activeFrame.SecondaryId : null;
 
-            // "First UPCOMING" means from NOW, not from the batch's first sample:
-            // reused batches keep samples up to their age cap in the past, and a
-            // scan from index 0 would re-find a marker the vessel already flew
-            // past. One bracketing sample at/behind now is kept (extremum detection
-            // needs interior neighbors; on a fresh batch this makes the scan start
-            // index 0 — bit-identical to the un-aged behavior).
+            // "First UPCOMING" means from NOW, not from the batch's first sample.
+            // Keep one bracketing sample at/behind now because extremum detection
+            // needs interior neighbors.
             int SeriesFrom(double[] times, int count) =>
                 Math.Min(Math.Max(0, OverlayKernel.UpperBound(times, nowSeconds) - 1), count - 1);
             int denseFrom = SeriesFrom(denseTimes, denseTimes.Length);

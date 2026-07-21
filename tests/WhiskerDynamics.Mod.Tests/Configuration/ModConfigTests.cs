@@ -203,18 +203,15 @@ public class ModConfigTests
     }
 
     [Fact]
-    public void Central_limits_match_sampling_and_history_consumers()
+    public void Central_sampling_limits_match_overlay_consumers()
     {
         var config = new ModConfig { OverlayMaxTurnDeg = 45 };
 
         config.NormalizeWorkload();
         double thetaMax = OverlayKernel.SamplingThetaRadians(45);
-        var history = FlownHistorySettings.Default;
 
         Assert.Equal(ModConfig.MaxOverlayTurnDegrees, config.OverlayMaxTurnDeg);
         Assert.Equal(ModConfig.MaxOverlayTurnDegrees * Math.PI / 180, thetaMax);
-        Assert.Equal(ModConfig.MaxWorkloadDays * ModConfig.SecondsPerDay,
-            history.RetentionSeconds);
     }
 
     [Fact]
@@ -279,10 +276,6 @@ public class ModConfigTests
     [Fact]
     public void Removed_configuration_keys_are_not_migrated_or_persisted()
     {
-        Assert.Null(typeof(ModConfig).GetProperty("HistoryRetentionDays"));
-        Assert.Null(typeof(ModConfig).GetProperty("HistorySampleSeconds"));
-        Assert.Null(typeof(ModConfig).GetProperty("HistoryMaxPoints"));
-        Assert.Null(typeof(ModConfig).GetProperty("HistoryDisplayDays"));
         Assert.Null(typeof(ModConfig).GetProperty("ShowAstralBodyLines"));
         Assert.Null(typeof(ModConfig).GetProperty("BurnNodeScale"));
 
@@ -290,11 +283,7 @@ public class ModConfigTests
         try
         {
             string path = Path.Combine(dir, "whiskerdynamics.toml");
-            string original = $"history_retention_days = 12{Environment.NewLine}"
-                + $"history_sample_seconds = 5{Environment.NewLine}"
-                + $"history_max_points = 1234{Environment.NewLine}"
-                + $"history_display_days = 90{Environment.NewLine}"
-                + $"show_astral_body_lines = false{Environment.NewLine}"
+            string original = $"show_astral_body_lines = false{Environment.NewLine}"
                 + $"burn_node_scale = 0.5{Environment.NewLine}";
             File.WriteAllText(path, original);
 
@@ -302,10 +291,6 @@ public class ModConfigTests
 
             Assert.True(SettingsPersistence.TrySave(config, path, out string error), error);
             string saved = File.ReadAllText(path);
-            Assert.DoesNotContain("history_retention_days", saved);
-            Assert.DoesNotContain("history_sample_seconds", saved);
-            Assert.DoesNotContain("history_max_points", saved);
-            Assert.DoesNotContain("history_display_days", saved);
             Assert.DoesNotContain("show_astral_body_lines", saved);
             Assert.DoesNotContain("burn_node_scale", saved);
         }

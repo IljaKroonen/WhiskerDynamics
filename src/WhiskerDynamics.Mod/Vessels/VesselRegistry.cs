@@ -22,7 +22,6 @@ public sealed class VesselRegistry
     {
         this.config = config;
         this.rails = rails;
-        rails.SetHistoryRetentionStartProvider(OldestHistoryStart);
     }
 
     /// <summary>Non-allocating capability token for strict authoritative-predictor
@@ -79,20 +78,6 @@ public sealed class VesselRegistry
     /// <summary>Throttles the per-vessel "canary" log line exactly like the celestial
     /// drift lines: one line at first verified commit, then one per 30 s wall clock.</summary>
     private readonly Patches.RailsTelemetry _canaryTelemetry = new(driftPeriodMs: 30_000);
-
-    private double? OldestHistoryStart()
-    {
-        lock (_gate)
-        {
-            double oldest = double.PositiveInfinity;
-            foreach (var tracked in _tracked.Values)
-            {
-                double candidate = tracked.FlownHistory.OldestTimeSeconds;
-                if (double.IsFinite(candidate)) oldest = Math.Min(oldest, candidate);
-            }
-            return double.IsFinite(oldest) ? oldest : null;
-        }
-    }
 
     public TrackedVessel GetOrSeed(VehicleUpdateState vehicleState)
     {

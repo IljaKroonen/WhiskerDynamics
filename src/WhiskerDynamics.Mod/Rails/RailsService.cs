@@ -53,7 +53,6 @@ public sealed class RailsService : IDisposable
     private readonly object _authorityFaultGate = new();
     private Exception? _authorityFailure;
     private Action<RailsService, Exception>? _authorityFaultHandler;
-    private volatile Func<double?>? _historyRetentionStartProvider;
     private long _thirdBodySnapshotBuildCount;
     private long _thirdBodyDynamicsBuildCount;
     private long _thirdBodyDynamicsPairEvaluationCount;
@@ -1482,18 +1481,6 @@ public sealed class RailsService : IDisposable
     internal static double RetentionCutoffSeconds(double nowSeconds, double keepBehindDays) =>
         nowSeconds - keepBehindDays * ModConfig.SecondsPerDay;
 
-    internal static double RetentionCutoffSeconds(
-        double nowSeconds, double keepBehindDays, double? historyStartSeconds)
-    {
-        double configured = RetentionCutoffSeconds(nowSeconds, keepBehindDays);
-        return historyStartSeconds is { } oldest
-            ? Math.Min(configured, oldest)
-            : configured;
-    }
-
-    internal void SetHistoryRetentionStartProvider(Func<double?> provider) =>
-        _historyRetentionStartProvider = provider;
-
     /// <summary>Catch-up chunk size (days of horizon per detached-growth round) and
     /// the per-cycle growth budget. The INTEGRATION runs off the Gate entirely
     /// (NBodyEphemerides.DetachedGrower); the Gate is held only for the seed capture
@@ -1560,10 +1547,9 @@ public sealed class RailsService : IDisposable
                         + $"{_config.RailsAheadDays:F0} d ahead "
                         + $"({knots} knots, ~{approxBytes / (1024 * 1024)} MB)");
                 }
-                double? historyStart = _historyRetentionStartProvider?.Invoke();
                 lock (Gate)
                     _ephemerides.Prune(RetentionCutoffSeconds(
-                        now, _config.RailsKeepBehindDays, historyStart));
+                        now, _config.RailsKeepBehindDays));
                 RefreshPredictionSnapshot();
                 // Honest orbit lines: celestial curve sampling (~1 Hz internally,
                 // always-on while enabled; frame mode iff a frame is active). Strictly

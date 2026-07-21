@@ -10,24 +10,4 @@ public class FramesPanelTimingTests
         Assert.True(FramesPanel.ReadoutRefreshDue(lastRefreshMs: 100, nowMs: 600));
         Assert.True(FramesPanel.ReadoutRefreshDue(lastRefreshMs: 600, nowMs: 100));
     }
-
-    [Fact]
-    public void History_coverage_refreshes_immediately_after_reset_and_duration_edit()
-    {
-        FramesPanel.ResetSessionStatics();
-        try
-        {
-            Assert.True(FramesPanel.TryBeginHistoryCoverageRefresh(nowMs: 100));
-            Assert.False(FramesPanel.TryBeginHistoryCoverageRefresh(nowMs: 599));
-            Assert.True(FramesPanel.TryBeginHistoryCoverageRefresh(nowMs: 600));
-
-            FramesPanel.InvalidateHistoryCoverageReadout();
-
-            Assert.True(FramesPanel.TryBeginHistoryCoverageRefresh(nowMs: 600));
-        }
-        finally
-        {
-            FramesPanel.ResetSessionStatics();
-        }
-    }
 }
