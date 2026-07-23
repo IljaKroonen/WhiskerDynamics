@@ -25,7 +25,7 @@ public class PatchSetTests
             .GetCustomAttributes<AssemblyMetadataAttribute>()
             .Where(attribute => attribute.Key == "VerifiedKsaBuild");
         var verifiedBuild = Assert.Single(metadata);
-        Assert.Equal("2026.7.6.4939", verifiedBuild.Value);
+        Assert.Equal("2026.7.8.4980", verifiedBuild.Value);
         Assert.Equal(verifiedBuild.Value, GameBuildPolicy.VerifiedBuild);
         Assert.True(GameBuildPolicy.IsVerified(verifiedBuild.Value!));
         Assert.False(GameBuildPolicy.IsVerified("2026.7.5.4892"));
