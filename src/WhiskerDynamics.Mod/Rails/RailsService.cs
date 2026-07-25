@@ -1498,22 +1498,27 @@ public sealed class RailsService : IDisposable
     {
         while (!_stop.IsCancellationRequested)
         {
+            bool catchingUp = false;
             try
             {
                 double now;
                 lock (Gate) now = _lastSimTime;
-                // RailsAheadDays is re-read every cycle from the SHARED config instance,
-                // so an in-game orbits-window change applies within one 500 ms cycle.
+                // RailsAheadDays is re-read every cycle from the SHARED config instance.
+                // Celestial ephemerides always stay at least 40 display-years ahead,
+                // regardless of a shorter in-game orbits-window request.
                 // Catch-up toward a raised target is DETACHED-CHUNKED: the integration
                 // (~16 ms per day of horizon at shipping scale) runs off the Gate on
                 // this thread; only the seed capture and the splice+knot-commitment
                 // hold it briefly per quarter-day chunk, so readers interleave freely
-                // however large the window jump (up to 40 y). The loop stops when the
-                // per-cycle budget is spent, resuming next cycle. Display windows
+                // however large the window jump. The loop stops when the
+                // per-cycle budget is spent. Maintenance runs between bursts, then
+                // catch-up resumes immediately while the worker remains behind.
+                // Display windows
                 // clamp to the horizon actually reached, so lines grow live while the
                 // worker catches up. Steady state (target moved by one cycle of sim
                 // time) is a single sub-chunk round.
-                double target = now + _config.RailsAheadDays * 86400;
+                double predictionAheadDays = Math.Max(_config.RailsAheadDays, 40.0 * 365.0);
+                double target = now + predictionAheadDays * 86400;
                 var growth = System.Diagnostics.Stopwatch.StartNew();
                 double horizon;
                 int knots = 0;
@@ -1544,9 +1549,10 @@ public sealed class RailsService : IDisposable
                 {
                     _lastGrowthLogMs = Environment.TickCount64;
                     ModLog.Info($"rails growing: {(horizon - now) / 86400.0:F1} of "
-                        + $"{_config.RailsAheadDays:F0} d ahead "
+                        + $"{predictionAheadDays:F0} d ahead "
                         + $"({knots} knots, ~{approxBytes / (1024 * 1024)} MB)");
                 }
+                catchingUp = horizon < target;
                 lock (Gate)
                     _ephemerides.Prune(RetentionCutoffSeconds(
                         now, _config.RailsKeepBehindDays));
@@ -1571,7 +1577,7 @@ public sealed class RailsService : IDisposable
                 ReportAuthorityFailure(e);
                 break;
             }
-            if (_stop.Token.WaitHandle.WaitOne(500)) break;
+            if (!catchingUp && _stop.Token.WaitHandle.WaitOne(500)) break;
         }
     }
 
