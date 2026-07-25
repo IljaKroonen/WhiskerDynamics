@@ -109,10 +109,8 @@ public sealed class ModConfig
     [TomlProperty("drill_warp_speed")] public double DrillWarpSpeed { get; set; } = 0;
     [TomlProperty("drill_warp_delay_ms")] public double DrillWarpDelayMs { get; set; } = 3000;
 
-    // Resilience. Unsupported KSA builds fail closed by default. This developer-only
-    // escape hatch still requires the API/signature checks below to pass, but those
-    // checks cannot prove behavioral compatibility.
-    [TomlProperty("allow_unverified_build")] public bool AllowUnverifiedBuild { get; set; } = false;
+    // Resilience drills. Runtime compatibility is decided by the concrete API,
+    // enum, and patch-activation checks in ModMain rather than an exact build string.
     [TomlProperty("simulate_mismatch")] public bool SimulateMismatch { get; set; } = false;
     [TomlProperty("simulate_type_drift")] public bool SimulateTypeDrift { get; set; } = false;
     [TomlProperty("fault_inject_vessel")] public string FaultInjectVessel { get; set; } = "";
