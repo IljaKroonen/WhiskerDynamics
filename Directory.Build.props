@@ -4,7 +4,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-    <!-- One mod commit/build supports exactly the KSA build it was compiled and verified against. -->
+    <!-- One mod commit/build is compiled and behaviorally verified against exactly one KSA build. -->
     <VerifiedKsaBuild>2026.7.9.5018</VerifiedKsaBuild>
   </PropertyGroup>
 </Project>

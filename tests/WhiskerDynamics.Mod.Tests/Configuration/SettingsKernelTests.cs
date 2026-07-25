@@ -301,7 +301,6 @@ public class SettingsKernelTests
             Assert.Equal(30, config.CelestialCurveDays);
             Assert.Equal(30, config.RailsAheadDays);
             SettingsKernel.ApplyPrediction(config, 120);
-            config.AllowUnverifiedBuild = true;
 
             Assert.True(SettingsPersistence.TrySave(config, path, out string error));
             Assert.Equal("", error);
@@ -310,7 +309,6 @@ public class SettingsKernelTests
             Assert.Equal(30, reloaded.OverlayHorizonDays);
             Assert.Equal(30, reloaded.CelestialCurveDays);
             Assert.Equal(30, reloaded.RailsAheadDays);
-            Assert.True(reloaded.AllowUnverifiedBuild);
             string saved = File.ReadAllText(path);
             Assert.DoesNotContain("overlay_horizon_days", saved);
             Assert.DoesNotContain("celestial_curve_days", saved);
@@ -352,7 +350,6 @@ public class SettingsKernelTests
             {
                 Enabled = true,
                 RailsKeepBehindDays = 240,
-                AllowUnverifiedBuild = true,
             };
             const string injected = "injected settings commit failure";
             var hooks = new AtomicTextFileHooks(
@@ -376,7 +373,6 @@ public class SettingsKernelTests
             ModConfig reloaded = ModConfig.LoadOrCreate(path);
             Assert.True(reloaded.Enabled);
             Assert.Equal(240, reloaded.RailsKeepBehindDays);
-            Assert.True(reloaded.AllowUnverifiedBuild);
         }
         finally
         {

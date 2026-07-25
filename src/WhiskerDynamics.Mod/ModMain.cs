@@ -62,18 +62,9 @@ public static class ModMain
 
         if (!GameBuildPolicy.IsVerified(gameVersion))
         {
-            string mismatch = $"running KSA {gameVersion}; this mod build supports "
-                + $"KSA {GameBuildPolicy.VerifiedBuild}";
-            if (!ModServices.Config.AllowUnverifiedBuild)
-            {
-                ModServices.Mismatches = [mismatch];
-                ModServices.Status = ModStatus.DisabledIncompatible;
-                ModLog.Error($"n-body disabled: {mismatch} (no gameplay patches applied)");
-                return;
-            }
-
-            ModLog.Warn($"{mismatch}; allow_unverified_build override enabled — "
-                + "continuing with API checks, but behavioral compatibility is not guaranteed");
+            ModLog.Warn($"running KSA {gameVersion}; this mod build was verified against "
+                + $"KSA {GameBuildPolicy.VerifiedBuild}. Continuing with compatibility checks; "
+                + "behavioral compatibility is not guaranteed");
         }
 
         // Graceful degradation on type-level drift: GameplayTargets is a separate static

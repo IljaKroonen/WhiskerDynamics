@@ -8,9 +8,10 @@ and on-rails propagation; KSA continues to handle thrust, drag, buoyancy,
 collisions, and joints. Stock conics and SOIs remain compatibility and UI
 mechanisms, not alternate dynamics.
 
-The mod is experimental and build-specific. Each release supports exactly the
-KSA build it was verified against. A mismatch disables the mod and leaves the
-game running stock.
+The mod is experimental. Each release records the exact KSA build it was
+verified against, but a different build is allowed to proceed through startup
+compatibility checks. If required game APIs, enum values, or patch targets have
+changed, the mod disables its gameplay patches and leaves the game running stock.
 
 ## Capabilities
 
