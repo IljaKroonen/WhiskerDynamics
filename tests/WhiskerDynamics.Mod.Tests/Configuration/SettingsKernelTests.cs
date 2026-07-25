@@ -428,7 +428,7 @@ public class SettingsKernelTests
     [Fact]
     public void Embedded_game_build_policy_accepts_only_the_verified_build()
     {
-        Assert.Equal("2026.7.8.4980", GameBuildPolicy.VerifiedBuild);
+        Assert.Equal("2026.7.9.5018", GameBuildPolicy.VerifiedBuild);
         Assert.True(GameBuildPolicy.IsVerified(GameBuildPolicy.VerifiedBuild));
         Assert.False(GameBuildPolicy.IsVerified("2026.7.5.4892"));
     }
