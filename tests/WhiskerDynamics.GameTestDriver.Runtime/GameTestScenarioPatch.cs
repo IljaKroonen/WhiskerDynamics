@@ -894,8 +894,10 @@ internal static class GameTestScenarioPatch
         var cores = vessel.Parts.RocketCores;
         foreach (RocketCore core in cores.Modules)
         {
-            bool fueled = core.ResourceManager.ResourceAvailable(vessel.Parts.Moles.States)
-                && cores.GetState(core).IsPropellantAvailable;
+            ref readonly RocketCoreState coreState = ref cores.GetState(core);
+            bool fueled = core.ComputePropellantAvailable(
+                    vessel.Parts.Moles.States, coreState.Throttle > 0f)
+                && coreState.IsPropellantAvailable;
             if (core.Controller is EngineController engine && engine.IsActive)
             {
                 status.ActiveEngineCores++;
@@ -1370,8 +1372,10 @@ internal static class GameTestScenarioPatch
             if (!state.IsPropellantAvailable) continue;
             foreach (RocketCore core in thruster.Cores)
             {
-                if (!core.ResourceManager.ResourceAvailable(vessel.Parts.Moles.States)
-                    || !cores.GetState(core).IsPropellantAvailable)
+                ref readonly RocketCoreState coreState = ref cores.GetState(core);
+                if (!core.ComputePropellantAvailable(
+                        vessel.Parts.Moles.States, coreState.Throttle > 0f)
+                    || !coreState.IsPropellantAvailable)
                     continue;
                 status.FueledControllers++;
                 break;
