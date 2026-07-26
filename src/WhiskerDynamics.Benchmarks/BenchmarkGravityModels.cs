@@ -15,7 +15,8 @@ internal static class BenchmarkGravityModels
             source.ReferenceRadiusM,
             maximumDegree,
             source.Normalization,
-            source.Coefficients);
+            source.Coefficients,
+            source.BodyFixedToModel);
         return settings.Create(new CatalogBody(
             "Luna", 1, "Earth", 1_737_400, null, null, rotation));
     }

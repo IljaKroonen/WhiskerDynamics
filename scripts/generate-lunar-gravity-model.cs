@@ -117,6 +117,14 @@ static async Task WriteJson(string path,
     json.AppendLine("    \"name\": \"GRGM1200A\",");
     json.AppendLine("    \"normalization\": \"fully_normalized\",");
     json.AppendLine("    \"reference_radius_m\": 1738000.0,");
+    // The PDS label defines GRGM in DE430 PA. Equation (5) of JPL's DE430
+    // lunar-coordinate memo maps KSA/Horizons MOON_ME coordinates to MOON_PA:
+    // https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de430_moon_coord.pdf
+    json.AppendLine("    \"body_fixed_to_model\": [");
+    json.AppendLine("      [0.9999998737703222, 0.0003276036692646292, -0.0003809661083013321],");
+    json.AppendLine("      [-0.0003276031191027799, 0.999999946336962, 1.5065247664135708e-6],");
+    json.AppendLine("      [0.0003809665814005746, -1.381718890893471e-6, 0.9999999274312748]");
+    json.AppendLine("    ],");
     json.AppendLine($"    \"maximum_degree\": {ShippingMaximumDegree},");
     json.AppendLine("    \"coefficients\": [");
     for (int i = 0; i < coefficients.Count; i++)

@@ -21,6 +21,11 @@ public class BodySettingsCatalogTests
                     "normalization": "fully_normalized",
                     "reference_radius_m": 1738000,
                     "maximum_degree": 2,
+                    "body_fixed_to_model": [
+                      [0, 1, 0],
+                      [-1, 0, 0],
+                      [0, 0, 1]
+                    ],
                     "coefficients": [
                       [2, 0, -9.08843393474243e-5, 0],
                       [2, 1, 1.46641235502819e-11, 1.17327642348892e-9],
@@ -64,6 +69,10 @@ public class BodySettingsCatalogTests
                 lunarModel.Normalization);
             Assert.Equal(2, lunarModel.MaximumDegree);
             Assert.Equal(3, lunarModel.Coefficients.Count);
+            var frame = Assert.IsType<BodyFixedToModelRotation>(
+                lunarModel.BodyFixedToModel);
+            Assert.Equal(new Vector3d(2, -1, 3),
+                frame.ToModelCoordinates(new Vector3d(1, 2, 3)));
         }
         finally
         {

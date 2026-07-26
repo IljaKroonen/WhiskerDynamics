@@ -14,7 +14,8 @@ internal static class TestGravityModels
             source.ReferenceRadiusM,
             maximumDegree,
             source.Normalization,
-            source.Coefficients);
+            source.Coefficients,
+            source.BodyFixedToModel);
     }
 
     internal static Geopotential Lunar(

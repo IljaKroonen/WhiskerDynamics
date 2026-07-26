@@ -17,15 +17,18 @@ public sealed class Geopotential
     private readonly int _maximumDegree;
     public double ReferenceRadius { get; }
     public BodyRotation Rotation { get; }
+    public BodyFixedToModelRotation? BodyFixedToModel { get; }
     public IReadOnlyList<SphericalHarmonicCoefficient> Coefficients => _coefficientView;
     public int Degree => _maximumDegree;
     public Geopotential(double radius, BodyRotation rotation,
-        IEnumerable<SphericalHarmonicCoefficient> coefficients)
+        IEnumerable<SphericalHarmonicCoefficient> coefficients,
+        BodyFixedToModelRotation? bodyFixedToModel = null)
     {
         if (!double.IsFinite(radius) || radius <= 0) throw new ArgumentOutOfRangeException(nameof(radius));
         ValidateRotation(rotation);
         ReferenceRadius = radius;
         Rotation = rotation;
+        BodyFixedToModel = bodyFixedToModel;
         ArgumentNullException.ThrowIfNull(coefficients);
         _coefficients = coefficients.OrderBy(c => c.Degree).ThenBy(c => c.Order).ToArray();
         _coefficientView = Array.AsReadOnly(_coefficients);
@@ -59,12 +62,13 @@ public sealed class Geopotential
         FromJ2(radius, NonRotatingBasis(pole), j2);
 
     public static Geopotential FromFullyNormalized(double radius, BodyRotation rotation,
-        IEnumerable<SphericalHarmonicCoefficient> coefficients) =>
+        IEnumerable<SphericalHarmonicCoefficient> coefficients,
+        BodyFixedToModelRotation? bodyFixedToModel = null) =>
         new(radius, rotation, coefficients.Select(c => c with
         {
             Cosine = c.Cosine * Normalization(c.Degree, c.Order),
             Sine = c.Sine * Normalization(c.Degree, c.Order),
-        }));
+        }), bodyFixedToModel);
 
     /// <summary>Analytic, pole-safe non-point-mass acceleration.</summary>
     public Vector3d AccelerationCorrection(Vector3d position, double mu, double time)
@@ -81,7 +85,10 @@ public sealed class Geopotential
         var bx = Rotation.XAxisEcl * cosAngle + Rotation.YAxisEcl * sinAngle;
         var by = Rotation.YAxisEcl * cosAngle - Rotation.XAxisEcl * sinAngle;
         var bz = Rotation.PoleEcl;
-        double x = position.Dot(bx), y = position.Dot(by), z = position.Dot(bz);
+        var bodyFixed = new Vector3d(
+            position.Dot(bx), position.Dot(by), position.Dot(bz));
+        var model = BodyFixedToModel?.ToModelCoordinates(bodyFixed) ?? bodyFixed;
+        double x = model.X, y = model.Y, z = model.Z;
         double rho = Math.Sqrt(x * x + y * y);
         double sinB = z / r, cosB = rho / r;
         double cosL = rho == 0 ? 1 : x / rho, sinL = rho == 0 ? 0 : y / rho;
@@ -149,6 +156,8 @@ public sealed class Geopotential
             dN = recycle;
         }
         var a = er * ar + eb * ab + el * al;
+        if (BodyFixedToModel is { } bodyFixedToModel)
+            a = bodyFixedToModel.ToBodyFixedCoordinates(a);
         return bx * a.X + by * a.Y + bz * a.Z;
     }
 
