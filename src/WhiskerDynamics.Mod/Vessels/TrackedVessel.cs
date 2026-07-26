@@ -103,6 +103,28 @@ public sealed class TrackedVessel
     private long _lastOverlayEnqueuedMs;
     private long _lastOverlayCompletedMs;
     private long _lastOverlayDurationMs;
+    private OverlayAnalysisLease? _overlayAnalysisInFlight;
+    private long _lastOverlayAnalysisCompletedMs;
+    private long _lastOverlayAnalysisDurationMs;
+    private long _lastOverlayAnalysisLoopMs;
+    private int _lastOverlayAnalysisRequestVersion;
+    private long _lastOverlayAnalysisSnapshotAttemptMs;
+    private int _lastOverlayAnalysisSnapshotAttemptVersion;
+
+    /// <summary>Identity-scoped ownership for one admitted analysis job. Request
+    /// versions alone are insufficient because live capture may queue a newer job for
+    /// the same request while the previous one is still completing.</summary>
+    internal sealed class OverlayAnalysisLease
+    {
+        internal OverlayAnalysisLease(int requestVersion, long startedMs)
+        {
+            RequestVersion = requestVersion;
+            StartedMs = startedMs;
+        }
+
+        internal int RequestVersion { get; }
+        internal long StartedMs { get; }
+    }
 
     /// <summary>Reserves this vessel's capture/enqueue phase. Ordinary refreshes wait
     /// at least the greater of their configured cadence and the previous job's cost,
@@ -149,6 +171,104 @@ public sealed class TrackedVessel
     {
         Volatile.Write(ref _lastOverlayDurationMs, Math.Max(0, durationMs));
         Volatile.Write(ref _lastOverlayCompletedMs, completedMs ?? Environment.TickCount64);
+    }
+
+    /// <summary>Prevents an ordinary display refresh from parking another copy of the
+    /// same expensive analysis behind its active worker job. A changed request version
+    /// may still replace pending work and cooperatively cancel the old pass.</summary>
+    internal bool IsOverlayAnalysisInFlight(int requestVersion) =>
+        Volatile.Read(ref _overlayAnalysisInFlight)?.RequestVersion == requestVersion;
+
+    internal OverlayAnalysisLease BeginOverlayAnalysis(
+        int requestVersion, long? startedMs = null)
+    {
+        var lease = new OverlayAnalysisLease(
+            requestVersion, startedMs ?? Environment.TickCount64);
+        Volatile.Write(ref _overlayAnalysisInFlight, lease);
+        return lease;
+    }
+
+    /// <summary>Admits at most one pass for an unchanged request. A new request
+    /// version atomically supersedes the old lease; an unchanged request waits at
+    /// least as long as the previous pass took before starting another rolling
+    /// analysis epoch.</summary>
+    internal OverlayAnalysisLease? TryBeginOverlayAnalysis(
+        int requestVersion, long nowMs, bool urgent)
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _overlayAnalysisInFlight);
+            if (current?.RequestVersion == requestVersion) return null;
+            if (current is null && !urgent)
+            {
+                long completed = Volatile.Read(ref _lastOverlayAnalysisCompletedMs);
+                long duration = Math.Max(
+                    0, Volatile.Read(ref _lastOverlayAnalysisDurationMs));
+                if (completed != 0 && nowMs - completed < Math.Max(50, duration))
+                    return null;
+            }
+            var lease = new OverlayAnalysisLease(requestVersion, nowMs);
+            if (ReferenceEquals(
+                    Interlocked.CompareExchange(
+                        ref _overlayAnalysisInFlight, lease, current),
+                    current))
+                return lease;
+        }
+    }
+
+    internal void CompleteOverlayAnalysis(
+        OverlayAnalysisLease lease, long? completedMs = null, long? startedMs = null)
+    {
+        if (!ReferenceEquals(
+                Interlocked.CompareExchange(
+                    ref _overlayAnalysisInFlight, null, lease),
+                lease))
+            return;
+        long completed = completedMs ?? Environment.TickCount64;
+        Volatile.Write(ref _lastOverlayAnalysisDurationMs,
+            Math.Max(0, completed - (startedMs ?? lease.StartedMs)));
+        Volatile.Write(ref _lastOverlayAnalysisCompletedMs, completed);
+    }
+
+    /// <summary>Records duration-aware cooldown only when a completed result was
+    /// published. A rejected/superseded publication releases the lease as cancellation
+    /// so the still-current request can be admitted again immediately.</summary>
+    internal void FinishOverlayAnalysis(OverlayAnalysisLease lease,
+        bool publicationAccepted, long? completedMs = null, long? startedMs = null)
+    {
+        if (publicationAccepted)
+            CompleteOverlayAnalysis(lease, completedMs, startedMs);
+        else
+            CancelOverlayAnalysis(lease);
+    }
+
+    /// <summary>Releases a lease whose analysis delegate never ran. Queue wait or
+    /// capture failure is not analysis cost and must not create a false cooldown.</summary>
+    internal void CancelOverlayAnalysis(OverlayAnalysisLease lease) =>
+        Interlocked.CompareExchange(ref _overlayAnalysisInFlight, null, lease);
+
+    /// <summary>Records the second-stage worker admission, not the earlier geometry
+    /// capture. A geometry job may be replaced before it reaches the analysis handoff;
+    /// stamping there would consume the request's urgent bypass without admitting any
+    /// analysis work. These fields are worker-written and producer-read.</summary>
+    internal void RecordOverlayAnalysisAdmission(
+        OverlayAnalysisLease lease, long? admittedMs = null)
+    {
+        Volatile.Write(ref _lastOverlayAnalysisLoopMs,
+            admittedMs ?? Environment.TickCount64);
+        Volatile.Write(ref _lastOverlayAnalysisRequestVersion, lease.RequestVersion);
+    }
+
+    /// <summary>Records producer-side attempts to acquire the immutable analysis
+    /// prediction window. This is deliberately separate from worker admission:
+    /// preparing a long rails snapshot can span many cycles, and its missing context
+    /// must not leave the request's urgent overlay bypass permanently armed.</summary>
+    internal void RecordOverlayAnalysisSnapshotAttempt(
+        int requestVersion, long? attemptedMs = null)
+    {
+        Volatile.Write(ref _lastOverlayAnalysisSnapshotAttemptMs,
+            attemptedMs ?? Environment.TickCount64);
+        Volatile.Write(ref _lastOverlayAnalysisSnapshotAttemptVersion, requestVersion);
     }
 
     /// <summary>Releases a capture that failed before enqueue. Job completion must not
@@ -240,7 +360,14 @@ public sealed class TrackedVessel
     internal object? LastOverlayPlanRef { get; set; }
     internal long LastOverlayPlanVersion { get; set; }
     internal long LastOverlayPlanBypassMs { get; set; }
-    internal long LastOverlayAnalysisLoopMs { get; set; }
+    internal long LastOverlayAnalysisLoopMs =>
+        Volatile.Read(ref _lastOverlayAnalysisLoopMs);
+    internal int LastOverlayAnalysisRequestVersion =>
+        Volatile.Read(ref _lastOverlayAnalysisRequestVersion);
+    internal long LastOverlayAnalysisSnapshotAttemptMs =>
+        Volatile.Read(ref _lastOverlayAnalysisSnapshotAttemptMs);
+    internal int LastOverlayAnalysisSnapshotAttemptVersion =>
+        Volatile.Read(ref _lastOverlayAnalysisSnapshotAttemptVersion);
     internal long LastSeenPlanEditStamp { get; set; } = -1;
 
     /// <summary>Wall-clock stamp of the last staging (GetOrSeed) or commit (VerifyCommit)
@@ -336,7 +463,10 @@ public sealed class TrackedVessel
 
     private void CancelOverlayWork(bool clearSamples)
     {
+        // Order matters: revoke the display ticket first so a job leaving geometry
+        // publication cannot hand fresh analysis work off after the analysis cancel.
         OverlayWorker.Cancel(Id);
+        OverlayAnalysisWorker.Cancel(Id);
         OverlayBuffer.RevokeVessel(Id, clearSamples);
     }
 

@@ -104,8 +104,9 @@ public sealed record OverlaySamples
     /// Celestial targets are stable by id; vessel targets key to their immutable dense
     /// geometry array, which survives ordinary actual-batch restamps.</summary>
     public object? MarkerCacheKey { get; init; }
-    /// <summary>Worker-side sampled-series orbit analysis for this batch's current
-    /// parent. Null until its equatorial pole and enough honest future samples are available.</summary>
+    /// <summary>Worker-side sampled-series orbit analysis frozen to the SOI body at
+    /// the requested interval's first timestamp. Null until its equatorial pole and
+    /// enough honest future samples are available.</summary>
     public OrbitAnalysisReport? Analysis { get; init; }
     /// <summary>Panel-ready reason when Analysis is unavailable; null when analysis
     /// was not requested for this batch (non-controlled/planned trajectories).</summary>
@@ -184,20 +185,82 @@ public static class OverlayBuffer
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, OverlaySamples> Planned =
         new(StringComparer.Ordinal);
 
-    public static void Publish(OverlaySamples samples)
+    public static void Publish(OverlaySamples samples) => PublishGeometry(samples);
+
+    /// <summary>Publishes fresh geometry without allowing it to erase a concurrently
+    /// completed analyser result. The compare-and-swap loop linearizes geometry
+    /// replacement against <see cref="TryPublishAnalysis"/>; whichever writer wins
+    /// first, the other retries against that immutable value.</summary>
+    internal static void PublishGeometry(OverlaySamples samples)
     {
-        if (samples.AnalysisRequestVersion == 0)
-        {
-            Current[samples.VesselId] = samples;
-            AdoptLinePublication(samples, planned: false);
-            return;
-        }
         lock (AnalysisPublishGate)
         {
-            if (!Ui.OrbitAnalyserPanel.RequestMatches(samples.AnalysisRequestVersion))
-                samples = samples.WithoutAnalysis();
-            Current[samples.VesselId] = samples;
-            AdoptLinePublication(samples, planned: false);
+            while (true)
+            {
+                Current.TryGetValue(samples.VesselId, out var current);
+                var merged = CarryAnalysisForward(samples, current);
+                bool published = current is null
+                    ? Current.TryAdd(samples.VesselId, merged)
+                    : Current.TryUpdate(samples.VesselId, merged, current);
+                if (!published) continue;
+                AdoptLinePublication(merged, planned: false);
+                return;
+            }
+        }
+    }
+
+    internal static OverlaySamples CarryAnalysisForward(
+        OverlaySamples geometry, OverlaySamples? current)
+    {
+        if (geometry.AnalysisRequestVersion != 0
+            || geometry.AnalysisRequested
+            || geometry.Analysis is not null
+            || geometry.AnalysisUnavailableReason is not null)
+            geometry = geometry.WithoutAnalysis();
+        if (current is null
+            || current.AnalysisRequestVersion == 0
+            || !string.Equals(current.VesselId, geometry.VesselId, StringComparison.Ordinal)
+            || !Ui.OrbitAnalyserPanel.RequestMatches(current.AnalysisRequestVersion))
+            return geometry;
+        return geometry with
+        {
+            Analysis = current.Analysis,
+            AnalysisUnavailableReason = current.AnalysisUnavailableReason,
+            AnalysisRequestVersion = current.AnalysisRequestVersion,
+            AnalysisRequested = true,
+        };
+    }
+
+    /// <summary>Attaches an analyser-only result to the newest vessel geometry.
+    /// Request and worker generation are rechecked at the atomic handoff. Geometry
+    /// parent is intentionally independent: the report freezes and names the SOI
+    /// body that owned the vessel at its requested start timestamp.</summary>
+    internal static bool TryPublishAnalysis(string vesselId, int requestVersion,
+        OrbitAnalysisReport? report, string? reason, int generation)
+    {
+        lock (SessionPublishGate)
+        {
+            if (generation != OverlayWorker.CurrentGeneration) return false;
+            lock (AnalysisPublishGate)
+            {
+                if (!Ui.OrbitAnalyserPanel.RequestMatches(requestVersion)) return false;
+                while (Current.TryGetValue(vesselId, out var current))
+                {
+                    var updated = current with
+                    {
+                        Analysis = report,
+                        AnalysisUnavailableReason = reason,
+                        AnalysisRequestVersion = requestVersion,
+                        AnalysisRequested = true,
+                    };
+                    if (Current.TryUpdate(vesselId, updated, current))
+                    {
+                        AdoptLinePublication(updated, planned: false);
+                        return true;
+                    }
+                }
+                return false;
+            }
         }
     }
 
@@ -375,16 +438,27 @@ public static class OverlayBuffer
     public static void ClearPlanned(string vesselId) => Planned.TryRemove(vesselId, out _);
 
     /// <summary>Revokes every display-ownership artifact for one vessel. Callers first
-    /// cancel its worker ticket; publication already inside that ticket's atomic gate
-    /// finishes before this clear, while every later publication is rejected.</summary>
+    /// cancel both worker tickets; publication already inside either ticket's atomic
+    /// gate finishes before this transaction. A continuity transition may retain the
+    /// last drawable geometry, but never its coast-specific analyser payload.</summary>
     internal static void RevokeVessel(string vesselId, bool clearSamples)
     {
         lock (SessionPublishGate)
         {
             RebuildLeases.TryRemove(vesselId, out _);
             LineLeases.TryRemove(vesselId, out _);
+            lock (AnalysisPublishGate)
+            {
+                if (clearSamples)
+                {
+                    Current.TryRemove(vesselId, out _);
+                }
+                else if (Current.TryGetValue(vesselId, out var current))
+                {
+                    Current.TryUpdate(vesselId, current.WithoutAnalysis(), current);
+                }
+            }
             if (!clearSamples) return;
-            Current.TryRemove(vesselId, out _);
             Planned.TryRemove(vesselId, out _);
         }
     }

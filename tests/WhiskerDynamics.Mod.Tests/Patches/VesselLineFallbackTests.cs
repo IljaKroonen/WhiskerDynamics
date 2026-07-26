@@ -8,6 +8,46 @@ namespace WhiskerDynamics.Mod.Tests.Patches;
 
 public class VesselLineFallbackTests
 {
+    [Fact]
+    public void Stock_conic_diagnostic_restores_and_leases_exact_stock_cache()
+    {
+        Orbit orbit = UninitializedOrbit();
+        OrbitPointCce[] stock = StockPoints(5.0);
+        OrbitPointCce[] staged = ModPoints(500.0);
+
+        TrajectoryOverlay.ReplaceCachedPointsForTest(orbit, stock);
+        TrajectoryOverlay.PreserveStockCacheForFallback(orbit);
+        TrajectoryOverlay.ReplaceCachedPointsForTest(orbit, staged);
+        IDisposable? lease = null;
+
+        bool runOriginal = VesselLinePatch.CompleteDisplayRoute(
+            orbit, runOriginal: false, showStockPatchedConics: true, ref lease);
+
+        try
+        {
+            Assert.True(runOriginal);
+            Assert.NotNull(lease);
+            AssertCacheBits(stock, orbit);
+        }
+        finally
+        {
+            VesselLinePatch.ReleaseFallbackLease(lease);
+        }
+    }
+
+    [Fact]
+    public void Hidden_stock_conic_diagnostic_keeps_successful_takeover_suppressed()
+    {
+        IDisposable? lease = null;
+
+        bool runOriginal = VesselLinePatch.CompleteDisplayRoute(
+            stockOrbit: null, runOriginal: false,
+            showStockPatchedConics: false, ref lease);
+
+        Assert.False(runOriginal);
+        Assert.Null(lease);
+    }
+
     [Theory]
     [InlineData((int)VesselLinePatch.ActualLinePhase.StageHandoff)]
     [InlineData((int)VesselLinePatch.ActualLinePhase.CameraPreparation)]

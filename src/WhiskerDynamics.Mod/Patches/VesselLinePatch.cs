@@ -47,6 +47,10 @@ namespace WhiskerDynamics.Mod.Patches;
 /// never flash back mid-session. Accepted trade-off: stock AN/DN +
 /// closest-approach target markers (computed against the suppressed conics) don't
 /// draw while ours is active.
+/// The diagnostics panel can explicitly overlay the stock patched-conic lines. The
+/// n-body line is drawn first, then the preserved exact stock cache is restored and
+/// leased through the stock original. This is display-only: marker and orbit-hit-test
+/// routing remain on the honest sampled trajectories.
 /// Staging every invocation is idempotent (pure function of the immutable batch);
 /// there is deliberately no frame-number de-dup — a duplicate stage costs one
 /// pooled 2000-point rebuild, cheaper than the proof a de-dup would need.</summary>
@@ -347,6 +351,16 @@ internal static class VesselLinePatch
 
             if (!fresh)
             {
+                // In diagnostics mode prefer stock's whole plan. Restore/lease first;
+                // if no exact stock cache is available, retain the ordinary safe
+                // patch-0 fallback below rather than expose a staged n-body cache to
+                // stock's closed-conic renderer.
+                if (DiagnosticDisplay.ShowStockPatchedConics
+                    && CompleteDisplayRoute(
+                        orbit, runOriginal: false,
+                        showStockPatchedConics: true, ref __state))
+                    return true;
+
                 // Stale fallback: draw ONLY patch 0 the stock way (stock colors,
                 // stock gates — mirrors FlightPlan.AddLineInstances:647-673 for one
                 // patch) and keep the rest suppressed. The patch-0 cache holds either
@@ -376,12 +390,17 @@ internal static class VesselLinePatch
             {
                 // The batch coordinates belong to the wrong frame mode. Suppress the
                 // line until TrajectoryOverlay republishes for the current context.
-                return false;
+                return CompleteDisplayRoute(
+                    orbit, runOriginal: false,
+                    DiagnosticDisplay.ShowStockPatchedConics, ref __state);
             }
 
             // Stock's own first gate (FlightPlan.cs:647): an orbit the player hid stays
             // hidden — but the stock conics stay suppressed (false), not re-drawn.
-            if (!vehicle.ShowOrbit && !vehicle.TargetOfControlledVehicle) return false;
+            if (!vehicle.ShowOrbit && !vehicle.TargetOfControlledVehicle)
+                return CompleteDisplayRoute(
+                    orbit, runOriginal: false,
+                    DiagnosticDisplay.ShowStockPatchedConics, ref __state);
 
             // Visibility is evaluated before any 2000-point handoff. The generic
             // orchestration then advances recovery state immediately before each
@@ -390,8 +409,11 @@ internal static class VesselLinePatch
             var actualOperations = new ProductionActualLineOperations(
                 vehicle, viewport, orbit, samples, isActive, drawVehiclePosition,
                 shouldDraw, nowMs, nowSimSeconds);
-            return ExecuteActualTakeover(
+            bool runOriginal = ExecuteActualTakeover(
                 ref recovery, ref actualOperations, out __state);
+            return CompleteDisplayRoute(
+                orbit, runOriginal,
+                DiagnosticDisplay.ShowStockPatchedConics, ref __state);
         }
         catch (Exception e)
         {
@@ -432,6 +454,22 @@ internal static class VesselLinePatch
             || acquired is null) return false;
         lease = new OneShotLease(acquired);
         return true;
+    }
+
+    /// <summary>Finishes an owned draw route. Ordinary mode preserves the takeover's
+    /// original decision. Diagnostics mode adds the stock original only after its
+    /// canvas has an exact stock cache and a lease excludes worker restaging through
+    /// Harmony's postfix/finalizer. A takeover failure that already selected stock
+    /// and acquired a lease passes through unchanged.</summary>
+    internal static bool CompleteDisplayRoute(
+        Orbit? stockOrbit,
+        bool runOriginal,
+        bool showStockPatchedConics,
+        ref IDisposable? lease)
+    {
+        if (runOriginal || !showStockPatchedConics) return runOriginal;
+        if (stockOrbit is null) return true;
+        return TryRunStockWithCacheLease(stockOrbit, out lease);
     }
 
     /// <summary>The exact stock cache remains protected from worker restaging until
@@ -528,7 +566,12 @@ internal static class VesselLinePatch
                 vehicle.Id, samples, planned: false, nowMs, nowSimSeconds);
             if (fresh)
                 DrawPlannedLine(vehicle, plan, viewport, isActive, nowMs, nowSimSeconds);
-            return false;
+            Orbit? stockOrbit = plan.Patches.Count > 0
+                ? plan.FirstPatch.Orbit
+                : null;
+            return CompleteDisplayRoute(
+                stockOrbit, runOriginal: false,
+                DiagnosticDisplay.ShowStockPatchedConics, ref lease);
         }
         catch (Exception e)
         {

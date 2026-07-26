@@ -32,6 +32,7 @@ public static class StatusPanel
         _open = false;
         _errors = 0;
         _firstDrawLogged = false;
+        DiagnosticDisplay.ResetSessionStatics();
         TelemetryCache.Reset();
     }
 
@@ -58,6 +59,20 @@ public static class StatusPanel
                     foreach (var line in ModServices.Mismatches)
                         ImGui.TextWrapped(line);
                 }
+                ImGui.SeparatorText("Visual debugging"u8);
+                bool showStockPatchedConics =
+                    DiagnosticDisplay.ShowStockPatchedConics;
+                if (ImGui.Checkbox(
+                        "Show stock patched conics"u8,
+                        ref showStockPatchedConics))
+                {
+                    DiagnosticDisplay.ShowStockPatchedConics =
+                        showStockPatchedConics;
+                    ModLog.Info("diagnostics: stock patched conics "
+                        + (showStockPatchedConics ? "shown" : "hidden"));
+                }
+                ImGui.SetItemTooltip(
+                    "draw the controlled vessel's stock patched-conic lines alongside the n-body actual and planned trajectories; visual comparison only, and reset when the game session changes"u8);
                 ImGui.SeparatorText("Telemetry and recent log"u8);
                 var telemetryLines = TelemetryCache.Read(
                     Environment.TickCount64, RefreshTelemetryCallback);

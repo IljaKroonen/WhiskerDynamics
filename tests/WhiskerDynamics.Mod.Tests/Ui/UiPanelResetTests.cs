@@ -34,6 +34,23 @@ public class UiPanelResetTests
             StatusPanel.ResetSessionStatics);
 
     [Fact]
+    public void Status_panel_reset_hides_stock_patched_conic_diagnostic()
+    {
+        try
+        {
+            DiagnosticDisplay.ShowStockPatchedConics = true;
+
+            StatusPanel.ResetSessionStatics();
+
+            Assert.False(DiagnosticDisplay.ShowStockPatchedConics);
+        }
+        finally
+        {
+            StatusPanel.ResetSessionStatics();
+        }
+    }
+
+    [Fact]
     public void Settings_window_is_closed_for_each_session() =>
         AssertWindowLifecycle(typeof(SettingsPanel), SettingsPanel.Open,
             SettingsPanel.ResetSessionStatics);

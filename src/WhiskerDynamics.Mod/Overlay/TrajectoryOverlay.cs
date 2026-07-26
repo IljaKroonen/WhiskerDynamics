@@ -3,6 +3,7 @@ using CommunityToolkit.HighPerformance.Buffers;
 using KSA;
 using System.Runtime.CompilerServices;
 using WhiskerDynamics.Core;
+using WhiskerDynamics.Mod.Soi;
 
 namespace WhiskerDynamics.Mod.Overlay;
 
@@ -40,9 +41,10 @@ public static class TrajectoryOverlay
     /// recaptures every rebuild) degrades to this cadence instead of a capture per
     /// physics tick.</summary>
     private const long PlanBypassPeriodMs = 250;
-    private const long AnalysisLoopPeriodMs = 250;
+    private const long AnalysisSnapshotRetryPeriodMs = 250;
     private const long WarnPeriodMs = 30_000;
     private const double SecondsPerDay = 86400;
+    private const double AnalysisPropagationChunkSeconds = 30 * SecondsPerDay;
 
     private readonly record struct AnalysisRequestCapture(
         bool Enabled, double StartOffsetSeconds, double SpanSeconds, int Version)
@@ -50,6 +52,162 @@ public static class TrajectoryOverlay
         internal double RequiredHorizonDays => Enabled
             ? (StartOffsetSeconds + SpanSeconds) / SecondsPerDay
             : 0;
+    }
+
+    internal readonly record struct RebuildHorizons(
+        double DisplayDays, double AnalysisDays);
+
+    /// <summary>The map line remains bounded by its display/plan window, while orbit
+    /// analysis may consume any wider rails coverage already integrated.</summary>
+    internal static RebuildHorizons ResolveRebuildHorizons(
+        double configuredDisplayDays, double displayAvailableDays,
+        double? planEndSeconds, double nowSeconds,
+        double integratedAvailableDays, double analysisRequiredDays)
+    {
+        double displayDays = FlightPlans.EffectiveHorizonDays(
+            configuredDisplayDays, displayAvailableDays, planEndSeconds, nowSeconds);
+        double analysisDays = double.IsFinite(analysisRequiredDays)
+            ? Math.Min(Math.Max(0.0, analysisRequiredDays),
+                Math.Max(0.0, integratedAvailableDays))
+            : 0.0;
+        return new(displayDays, analysisDays);
+    }
+
+    internal readonly record struct PredictionCaptures<T>(
+        T Display, T? Analysis) where T : class;
+
+    /// <summary>Captures display coverage first and treats wider analyser coverage as
+    /// optional. A long incremental analyser-snapshot build therefore cannot suppress
+    /// an ordinary line refresh that the already-published display snapshot can serve.</summary>
+    internal static PredictionCaptures<T>? TryCapturePredictionContexts<T>(
+        Func<double, double, T?> captureDisplay,
+        Func<double, double, T?> captureAnalysis,
+        double displayFrom, double displayTo,
+        double analysisFrom, double analysisTo,
+        bool analysisEnabled) where T : class
+    {
+        T? display = captureDisplay(displayFrom, displayTo);
+        if (display is null) return null;
+
+        T? analysis = null;
+        if (analysisEnabled && analysisTo > analysisFrom)
+        {
+            analysis = analysisFrom >= displayFrom && analysisTo <= displayTo
+                ? display
+                : captureAnalysis(analysisFrom, analysisTo);
+        }
+        return new(display, analysis);
+    }
+
+    /// <summary>Identifies a request version that has not reached analysis handoff.
+    /// Consumers use this state both to poll its snapshot and to make the eventual
+    /// ready handoff urgent. Repeated passes then respect the analysis-specific
+    /// duration-aware cooldown.</summary>
+    internal static bool AnalysisRequestNeedsUrgentCapture(
+        bool enabled, int requestVersion, int lastAdmittedVersion) =>
+        enabled && requestVersion != lastAdmittedVersion;
+
+    /// <summary>While the rails worker prepares a missing analysis snapshot, retry
+    /// capture at a bounded cadence. A changed request still gets one immediate
+    /// attempt, but that attempt consumes its own producer-side bypass even though no
+    /// analysis job can yet be admitted.</summary>
+    internal static bool AnalysisSnapshotAttemptDue(
+        bool enabled, int requestVersion, int lastAdmittedVersion,
+        int lastAttemptVersion, long nowMs, long lastAttemptMs,
+        long retryPeriodMs = AnalysisSnapshotRetryPeriodMs) =>
+        AnalysisRequestNeedsUrgentCapture(
+            enabled, requestVersion, lastAdmittedVersion)
+        && (requestVersion != lastAttemptVersion
+            || nowMs - lastAttemptMs >= retryPeriodMs);
+
+    /// <summary>Reserves analysis only when geometry has reached the second-stage
+    /// handoff. Pending latest-wins geometry therefore carries no lease that a newer
+    /// capture could discard before any analysis work is admitted.</summary>
+    internal static TrackedVessel.OverlayAnalysisLease? TryBeginOverlayAnalysisHandoff(
+        TrackedVessel tracked, bool analysisWorkEnabled,
+        int requestVersion, long nowMs)
+    {
+        if (!analysisWorkEnabled) return null;
+        bool urgent = AnalysisRequestNeedsUrgentCapture(
+            enabled: true,
+            requestVersion,
+            tracked.LastOverlayAnalysisRequestVersion);
+        return tracked.TryBeginOverlayAnalysis(requestVersion, nowMs, urgent);
+    }
+
+    /// <summary>Resolves the deepest SOI owner at the requested analysis epoch from
+    /// the hierarchy root. Starting at the root instead of the overlay's captured
+    /// parent makes a delayed request independent of any intervening stock/rails
+    /// reparent and supports transitions across more than one hierarchy level.</summary>
+    internal static string AnalysisBodyAtStart(string rootId,
+        Vector3d vesselAbsolute,
+        Func<string, IReadOnlyList<string>> childrenOf,
+        Func<string, Vector3d> absolutePositionOf,
+        Func<string, double> sphereOfInfluenceOf)
+    {
+        string owner = rootId;
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        while (visited.Add(owner))
+        {
+            string? containedChild = null;
+            foreach (string child in childrenOf(owner))
+            {
+                double soi = sphereOfInfluenceOf(child);
+                if (!(soi > 0) || !double.IsFinite(soi)) continue;
+                if ((vesselAbsolute - absolutePositionOf(child)).Length() <= soi)
+                {
+                    containedChild = child;
+                    break;
+                }
+            }
+            if (containedChild is null) return owner;
+            owner = containedChild;
+        }
+        throw new InvalidOperationException(
+            $"SOI hierarchy contains a cycle at '{owner}'");
+    }
+
+    internal sealed record AnalysisSoiRelativeSeries(
+        string Id, double SoiRadius, Vector3d[] VesselRelativePositions);
+
+    internal readonly record struct AnalysisSoiTransition(
+        double TimeSeconds, string NewBodyId);
+
+    /// <summary>Returns the first transition away from a frozen analysis body.
+    /// Each interval is swept as a relative chord, so a child flyby that enters and
+    /// exits between two samples is detected even when both endpoints are outside.</summary>
+    internal static AnalysisSoiTransition? FindFirstAnalysisSoiTransition(
+        double[] times, Vector3d[] bodyRelativePositions, double bodySoi,
+        string? parentBodyId,
+        IReadOnlyList<AnalysisSoiRelativeSeries> children)
+    {
+        if (times.Length != bodyRelativePositions.Length)
+            throw new ArgumentException("analysis SOI series lengths differ");
+        foreach (var child in children)
+            if (child.VesselRelativePositions.Length != times.Length)
+                throw new ArgumentException(
+                    $"analysis SOI series length differs for '{child.Id}'");
+
+        var sweptChildren = new SoiReparentKernel.SweptCandidate[children.Count];
+        for (int i = 0; i + 1 < times.Length; i++)
+        {
+            for (int child = 0; child < children.Count; child++)
+            {
+                var series = children[child];
+                sweptChildren[child] = new(series.Id,
+                    series.VesselRelativePositions[i],
+                    series.VesselRelativePositions[i + 1],
+                    series.SoiRadius);
+            }
+            if (SoiReparentKernel.FirstCrossing(
+                    bodyRelativePositions[i], bodyRelativePositions[i + 1],
+                    bodySoi, parentBodyId, sweptChildren) is not { } crossing)
+                continue;
+            double time = times[i]
+                + (times[i + 1] - times[i]) * crossing.Fraction;
+            return new(time, crossing.NewParentId);
+        }
+        return null;
     }
 
     private static AnalysisRequestCapture CaptureAnalysisRequest(string vesselId)
@@ -278,39 +436,74 @@ public static class TrajectoryOverlay
             // Actual-line horizon: a vessel with a plan predicts at least to the plan
             // end, while the config horizon stays the floor for every vessel. The
             // planned line gets its own hard plan-end cap during RebuildPlanned.
-            // Everything clamps to
-            // the rails window ACTUALLY integrated (quantized — see
+            // Display geometry clamps to the configured rails window ACTUALLY
+            // integrated (quantized — see
             // OverlayKernel.QuantizeRailsWindow): while the worker grows a raised
             // preset chunk by chunk, the line grows with it — sampling past the
-            // reached horizon would synchronously extend the ephemerides under the
-            // Gate instead.
+            // reached horizon would synchronously extend the ephemerides. Analysis
+            // separately uses the wider integrated rails retention without changing
+            // this displayed horizon.
             double railsAvailableDays = OverlayKernel.QuantizeRailsWindow(
                 tracked.Rails.AvailableAheadDays(t0), config.RailsAheadDays);
-            double requestedHorizonDays = Math.Max(
-                config.OverlayHorizonDays, analysisRequest.RequiredHorizonDays);
-            double horizonDays = FlightPlans.EffectiveHorizonDays(
-                requestedHorizonDays, railsAvailableDays, plan?.EndSeconds, t0);
-            double horizon = t0 + horizonDays * 86400.0;
+            double integratedAvailableDays = analysisRequest.Enabled
+                ? tracked.Rails.IntegratedAheadDays(t0)
+                : railsAvailableDays;
+            var horizons = ResolveRebuildHorizons(
+                config.OverlayHorizonDays, railsAvailableDays, plan?.EndSeconds, t0,
+                integratedAvailableDays, analysisRequest.RequiredHorizonDays);
+            double horizon = t0 + horizons.DisplayDays * SecondsPerDay;
+            double analysisHorizon = t0 + horizons.AnalysisDays * SecondsPerDay;
             if (horizon <= t0)
             {
                 LastNote = "overlay waiting for the rails horizon";
                 return;
             }
-            bool analysisLoopDue = analysisRequest.Enabled
-                && nowMs - tracked.LastOverlayAnalysisLoopMs >= AnalysisLoopPeriodMs;
-            if (!tracked.TryBeginOverlayRebuild(nowMs, RebuildPeriodMs,
-                    contextChanged || planChanged || analysisLoopDue)) return;
+            bool analysisPending = AnalysisRequestNeedsUrgentCapture(
+                analysisRequest.Enabled, analysisRequest.Version,
+                tracked.LastOverlayAnalysisRequestVersion);
+            bool analysisLoopDue = AnalysisSnapshotAttemptDue(
+                analysisRequest.Enabled, analysisRequest.Version,
+                tracked.LastOverlayAnalysisRequestVersion,
+                tracked.LastOverlayAnalysisSnapshotAttemptVersion,
+                nowMs, tracked.LastOverlayAnalysisSnapshotAttemptMs);
+            RailsService.PredictionContext? attemptedAnalysisPrediction = null;
+            bool analysisSnapshotReady = false;
+            if (analysisLoopDue)
+            {
+                tracked.RecordOverlayAnalysisSnapshotAttempt(
+                    analysisRequest.Version, nowMs);
+                // Poll/queue the long snapshot independently of display capture. If
+                // the display context already covers the interval, the normal capture
+                // below reuses it and can hand off immediately.
+                analysisSnapshotReady = analysisHorizon <= horizon;
+                if (!analysisSnapshotReady)
+                {
+                    attemptedAnalysisPrediction =
+                        tracked.Rails.TryCaptureAnalysisPredictionContext(
+                            t0, analysisHorizon, analysisRequest.Version);
+                    analysisSnapshotReady = attemptedAnalysisPrediction is not null;
+                }
+            }
+            bool urgent = contextChanged || planChanged || analysisSnapshotReady;
+            if (!tracked.TryBeginOverlayRebuild(nowMs, RebuildPeriodMs, urgent)) return;
             reserved = true;
             double captureFrom = t0;
             var planState = plan?.SnapshotState.Snapshot;
             if (planState is not null) captureFrom = Math.Min(captureFrom, planState.EpochSeconds);
-            var prediction = tracked.Rails.TryCapturePredictionContext(captureFrom, horizon);
-            if (prediction is null)
+            var predictionCaptures = TryCapturePredictionContexts(
+                tracked.Rails.TryCapturePredictionContext,
+                (from, to) => analysisPending
+                    ? (analysisLoopDue ? attemptedAnalysisPrediction : null)
+                    : tracked.Rails.TryCaptureAnalysisPredictionContext(
+                        from, to, analysisRequest.Version),
+                captureFrom, horizon, t0, analysisHorizon, analysisRequest.Enabled);
+            if (predictionCaptures is not { } captures)
             {
                 tracked.CancelOverlayRebuild();
                 reserved = false;
                 return;
             }
+            var prediction = captures.Display;
             if (!tracked.TryCaptureOverlayAnchor(
                     overlayLineage, t0, out var authorityLineage, out var capturedAnchor))
             {
@@ -331,10 +524,11 @@ public static class TrajectoryOverlay
             // worker (a synchronous full-horizon rebuild here would be a rhythmic
             // physics-thread stall scaling with the dense budget).
             var scope = RebuildScope.Create(config, tracked, vehicleState.Id,
-                parentBody, currentOrbit, t0, horizon, plan,
+                parentBody, currentOrbit, t0, horizon, analysisHorizon, plan,
                 plannedSeed: () => TrackedVessel.NewDisplayPredictorAt(
                     capturedAnchor, t0, prediction.Gravity),
-                railsAheadDays: railsAvailableDays, prediction, capturedAnchor,
+                railsAheadDays: railsAvailableDays, prediction, captures.Analysis,
+                capturedAnchor,
                 nowMs, captureSimSeconds, analysisRequest);
             var stockBurnScan = ScanStockBurns(vehicleState, parentBody.Id, plan);
             PropulsionSource propulsion = plan?.PropulsionSource ?? PropulsionSource.MainEngines;
@@ -389,7 +583,7 @@ public static class TrajectoryOverlay
                 CaptureSimSeconds = captureSimSeconds,
                 RebuildLease = rebuildLease,
                 OffRails = false,
-                HorizonDays = horizonDays,
+                HorizonDays = horizons.DisplayDays,
             };
             if (!OverlayWorker.Enqueue(vehicleState.Id, generation,
                     () => ModServices.IsBindingCurrent(bindingGeneration, tracked.Rails)
@@ -400,9 +594,10 @@ public static class TrajectoryOverlay
                         job.IsSuperseded = superseded;
                         job.PublishIfCurrent = publishIfCurrent;
                         job.Run();
-                    }))
+                    },
+                    job.Discard))
             {
-                OverlayBuffer.EndRebuildLease(rebuildLease);
+                job.Discard();
                 activeLease = null;
                 tracked.CancelOverlayRebuild();
             }
@@ -412,7 +607,6 @@ public static class TrajectoryOverlay
                 reserved = false;
                 activeLease = null;
                 tracked.LastSeenPlanEditStamp = editStamp;
-                if (analysisLoopDue) tracked.LastOverlayAnalysisLoopMs = nowMs;
             }
         }
         catch (Exception e)
@@ -477,27 +671,35 @@ public static class TrajectoryOverlay
             var analysisRequest = CaptureAnalysisRequest(vehicleState.Id);
             long editStamp = FlightPlans.EditStamp;
             FlightPlanModel? plan = FlightPlans.TryGet(vehicleState.Id);
-            // Clamped to the rails horizon actually reached, like the on-rails path.
+            // Display and analysis horizons resolve independently, like the on-rails path.
             double railsAvailableDays = OverlayKernel.QuantizeRailsWindow(
                 tracked.Rails.AvailableAheadDays(t0), config.RailsAheadDays);
-            double requestedHorizonDays = Math.Max(
-                config.OverlayHorizonDays, analysisRequest.RequiredHorizonDays);
-            double horizonDays = FlightPlans.EffectiveHorizonDays(
-                requestedHorizonDays, railsAvailableDays, plan?.EndSeconds, t0);
-            double horizon = t0 + horizonDays * 86400.0;
+            double integratedAvailableDays = analysisRequest.Enabled
+                ? tracked.Rails.IntegratedAheadDays(t0)
+                : railsAvailableDays;
+            var horizons = ResolveRebuildHorizons(
+                config.OverlayHorizonDays, railsAvailableDays, plan?.EndSeconds, t0,
+                integratedAvailableDays, analysisRequest.RequiredHorizonDays);
+            double horizon = t0 + horizons.DisplayDays * SecondsPerDay;
+            double analysisHorizon = t0 + horizons.AnalysisDays * SecondsPerDay;
             if (horizon <= t0) return;
             if (!tracked.TryBeginContinuousOverlayRebuild()) return;
             reserved = true;
             double captureFrom = t0;
             var planState = plan?.SnapshotState.Snapshot;
             if (planState is not null) captureFrom = Math.Min(captureFrom, planState.EpochSeconds);
-            var prediction = tracked.Rails.TryCapturePredictionContext(captureFrom, horizon);
-            if (prediction is null)
+            var predictionCaptures = TryCapturePredictionContexts(
+                tracked.Rails.TryCapturePredictionContext,
+                (from, to) => tracked.Rails.TryCaptureAnalysisPredictionContext(
+                    from, to, analysisRequest.Version),
+                captureFrom, horizon, t0, analysisHorizon, analysisRequest.Enabled);
+            if (predictionCaptures is not { } captures)
             {
                 tracked.CancelOverlayRebuild();
                 reserved = false;
                 return;
             }
+            var prediction = captures.Display;
             tracked.LastOverlayPlanRef = plan;
             tracked.LastOverlayPlanVersion = plan?.Version ?? 0;
 
@@ -510,10 +712,10 @@ public static class TrajectoryOverlay
             var live = tracked.NewLiveDisplayPredictor(
                 currentOrbit, in sv, prediction.Gravity, out var liveSeed);
             var scope = RebuildScope.Create(config, tracked, vehicleState.Id,
-                parentBody, currentOrbit, t0, horizon, plan,
+                parentBody, currentOrbit, t0, horizon, analysisHorizon, plan,
                 plannedSeed: () => TrackedVessel.NewDisplayPredictorAt(
                     liveSeed, t0, prediction.Gravity),
-                railsAheadDays: railsAvailableDays, prediction, liveSeed,
+                railsAheadDays: railsAvailableDays, prediction, captures.Analysis, liveSeed,
                 nowMs, captureSimSeconds, analysisRequest);
             var stockBurnScan = ScanStockBurns(vehicleState, parentBody.Id, plan);
             PropulsionSource propulsion = plan?.PropulsionSource ?? PropulsionSource.MainEngines;
@@ -567,9 +769,10 @@ public static class TrajectoryOverlay
                         job.IsSuperseded = superseded;
                         job.PublishIfCurrent = publishIfCurrent;
                         job.Run();
-                    }))
+                    },
+                    job.Discard))
             {
-                OverlayBuffer.EndRebuildLease(rebuildLease);
+                job.Discard();
                 activeLease = null;
                 tracked.CancelOverlayRebuild();
             }
@@ -692,11 +895,11 @@ public static class TrajectoryOverlay
                         ? Scope.ReuseActualBatch(
                             reusable, display, CaptureSimSeconds, Obsolete)
                         : Scope.SampleBatch(display, Scope.T0, periodHint, CaptureSimSeconds,
-                            includeAnalysis: Scope.AnalysisWorkEnabled,
                             shouldStop: Obsolete,
                             anchorStateOverride: anchorState);
                 if (Obsolete()) return;
-                if (!PublishWhenCurrent(() => OverlayBuffer.Publish(samples))) return;
+                if (!PublishWhenCurrent(() => OverlayBuffer.PublishGeometry(samples))) return;
+                QueueAnalysis();
                 // During live physics, retain/restamp only already-proven planned
                 // geometry; defer all new planned integration until rails resume.
                 if (Obsolete()) return;
@@ -709,7 +912,7 @@ public static class TrajectoryOverlay
                 // stamping completion, rather than the earlier actual-sweep instant.
                 if (Obsolete()) return;
                 samples = samples with { SampleWallMs = Environment.TickCount64 };
-                if (!PublishWhenCurrent(() => OverlayBuffer.Publish(samples))) return;
+                if (!PublishWhenCurrent(() => OverlayBuffer.PublishGeometry(samples))) return;
                 if (Generation != OverlayWorker.CurrentGeneration)
                 {
                     // A session sweep raced this rebuild: whichever side of the
@@ -749,6 +952,52 @@ public static class TrajectoryOverlay
                 Tracked.CompleteOverlayRebuild(
                     OffRails ? 0 : Environment.TickCount64 - startedMs);
             }
+        }
+
+        private void QueueAnalysis()
+        {
+            var lease = TryBeginOverlayAnalysisHandoff(
+                Tracked, Scope.AnalysisWorkEnabled,
+                Scope.AnalysisRequestVersion, Environment.TickCount64);
+            if (lease is null) return;
+            var analysisJob = new OverlayAnalysisJob
+            {
+                VesselId = VesselId,
+                Tracked = Tracked,
+                Scope = Scope,
+                Generation = Generation,
+                BindingGeneration = BindingGeneration,
+                OverlayLineage = OverlayLineage,
+                AuthorityLineage = AuthorityLineage,
+                Lease = lease,
+            };
+            bool accepted = OverlayAnalysisWorker.Enqueue(
+                VesselId, Generation,
+                // Recheck the display ticket at the handoff. Reseed cancellation
+                // revokes it before cancelling analysis, closing the gap between an
+                // actual-line publication and this second-stage enqueue.
+                () => !IsSuperseded()
+                    && ModServices.IsBindingCurrent(BindingGeneration, Tracked.Rails)
+                    && Tracked.IsOverlayLineageCurrent(
+                        OverlayLineage, AuthorityLineage),
+                (superseded, publishIfCurrent) =>
+                {
+                    analysisJob.IsSuperseded = superseded;
+                    analysisJob.PublishIfCurrent = publishIfCurrent;
+                    analysisJob.Run();
+                },
+                analysisJob.Discard);
+            if (accepted)
+                Tracked.RecordOverlayAnalysisAdmission(lease);
+            else
+                analysisJob.Discard();
+        }
+
+        /// <summary>Releases resources owned by a capture that left the pending
+        /// latest-wins slot without ever reaching <see cref="Run"/>.</summary>
+        public void Discard()
+        {
+            OverlayBuffer.EndRebuildLease(RebuildLease);
         }
 
         private (int BurnsApplied, bool Truncated, bool DynamicsLimited) RestampOrClearPlannedOffRails(
@@ -843,6 +1092,82 @@ public static class TrajectoryOverlay
                 Tracked.LastOverlayBurnsApplied = burnsApplied;
             }
         }
+    }
+
+    private sealed class OverlayAnalysisJob
+    {
+        public required string VesselId { get; init; }
+        public required TrackedVessel Tracked { get; init; }
+        public required RebuildScope Scope { get; init; }
+        public required int Generation { get; init; }
+        public required long BindingGeneration { get; init; }
+        public required long OverlayLineage { get; init; }
+        public required TrajectoryPredictor? AuthorityLineage { get; init; }
+        public required TrackedVessel.OverlayAnalysisLease Lease { get; init; }
+        public Func<bool> IsSuperseded { get; set; } = static () => false;
+        public Func<Action, bool> PublishIfCurrent { get; set; } = static action =>
+        {
+            action();
+            return true;
+        };
+
+        public void Run()
+        {
+            bool analysisStarted = false;
+            bool recordCooldown = false;
+            long analysisStartedMs = 0;
+            try
+            {
+                bool Obsolete() => IsSuperseded()
+                    || !ModServices.IsBindingCurrent(BindingGeneration, Tracked.Rails)
+                    || !Tracked.IsOverlayLineageCurrent(
+                        OverlayLineage, AuthorityLineage);
+                if (Generation != OverlayWorker.CurrentGeneration || Obsolete()) return;
+                analysisStarted = true;
+                analysisStartedMs = Environment.TickCount64;
+                var result = Scope.ComputeAnalysis(Obsolete);
+                if (!result.Completed) return;
+                if (Obsolete())
+                {
+                    recordCooldown = false;
+                    return;
+                }
+                bool published = false;
+                bool lineageAccepted = PublishIfCurrent(() =>
+                {
+                    // The analysis worker's current-ticket gate is shared with
+                    // per-vessel cancellation. Recheck the captured authority inside
+                    // that atomic callback; a reseed either makes this false before
+                    // publication or cancels after publication and strips the payload.
+                    if (ModServices.IsBindingCurrent(BindingGeneration, Tracked.Rails)
+                        && Tracked.IsOverlayLineageCurrent(
+                            OverlayLineage, AuthorityLineage))
+                        published = OverlayBuffer.TryPublishAnalysis(
+                            VesselId, Scope.AnalysisRequestVersion,
+                            result.Report, result.Reason, Generation);
+                });
+                recordCooldown = lineageAccepted && published;
+            }
+            catch (OperationCanceledException)
+            {
+                // Request change, session reset, or vessel-lineage replacement.
+            }
+            catch (Exception e)
+            {
+                LastNote = $"orbit analysis contained: {e.Message}";
+                WarnThrottled($"orbit analysis contained: {e}");
+            }
+            finally
+            {
+                if (analysisStarted)
+                    Tracked.FinishOverlayAnalysis(
+                        Lease, recordCooldown, startedMs: analysisStartedMs);
+                else
+                    Tracked.CancelOverlayAnalysis(Lease);
+            }
+        }
+
+        public void Discard() => Tracked.CancelOverlayAnalysis(Lease);
     }
 
     /// <summary>One coherent stock burn-list read per rebuild (the UI thread may be
@@ -1316,7 +1641,6 @@ public static class TrajectoryOverlay
         double hintTime = Math.Min(sampleStart + 1.0, plannedHorizon);
         var batch = scope.SampleBatch(planned, sampleStart, scope.PeriodHintAt(planned, hintTime),
             actualSamples.CaptureSimSeconds,
-            includeAnalysis: false,
             shouldStop: shouldStop, horizonOverride: plannedHorizon);
         if (shouldStop()) throw new OperationCanceledException();
         if (!publishIfCurrent(() => OverlayBuffer.PublishPlanned(batch)))
@@ -1429,6 +1753,7 @@ public static class TrajectoryOverlay
     {
         public required RailsService Rails { get; init; }
         public required RailsService.PredictionContext Prediction { get; init; }
+        public required RailsService.PredictionContext? AnalysisPrediction { get; init; }
         public required TrackedVessel Tracked { get; init; }
         public required string VesselId { get; init; }
         /// <summary>Parent id string, not the Astronomical: the scope crosses to the
@@ -1437,6 +1762,7 @@ public static class TrajectoryOverlay
         public required double T0 { get; init; }
         public required StateVector CurrentAnchor { get; init; }
         public required double Horizon { get; init; }
+        public required double AnalysisHorizon { get; init; }
         public required double ThetaMax { get; init; }
         public required ActiveFrameSnapshot? FrameSnapshot { get; init; }
         public FrameSpec? ActiveFrame => FrameSnapshot?.Spec;
@@ -1484,8 +1810,11 @@ public static class TrajectoryOverlay
         /// during a burn and the line drawn a second after it.</summary>
         public static RebuildScope Create(ModConfig config, TrackedVessel tracked, string vesselId,
             Astronomical parentBody, Orbit currentOrbit, double t0, double horizon,
+            double analysisHorizon,
             FlightPlanModel? plan, Func<TrajectoryPredictor> plannedSeed, double railsAheadDays,
-            RailsService.PredictionContext prediction, StateVector currentAnchor,
+            RailsService.PredictionContext prediction,
+            RailsService.PredictionContext? analysisPrediction,
+            StateVector currentAnchor,
             long nowWallMs, double captureSimSeconds,
             AnalysisRequestCapture analysisRequest)
         {
@@ -1493,7 +1822,9 @@ public static class TrajectoryOverlay
                 config.OverlayMaxTurnDeg);
             bool markerWorkEnabled = OverlayKernel.MarkerWorkEnabled(
                 KSA.Program.ControlledVehicle?.Id, vesselId);
-            bool analysisWorkEnabled = markerWorkEnabled && analysisRequest.Enabled;
+            bool analysisWorkEnabled = markerWorkEnabled
+                && analysisRequest.Enabled
+                && analysisPrediction is not null;
             ActiveFrameSnapshot? frameSnapshot = FrameManager.TryCaptureActive(out var captured)
                 ? captured : null;
             TerrainHeightSnapshot? terrain = frameSnapshot?.Spec is
@@ -1504,12 +1835,14 @@ public static class TrajectoryOverlay
                 PlannedSeed = plannedSeed,
                 Rails = tracked.Rails,
                 Prediction = prediction,
+                AnalysisPrediction = analysisPrediction,
                 Tracked = tracked,
                 VesselId = vesselId,
                 ParentBodyId = parentBody.Id,
                 T0 = t0,
                 CurrentAnchor = currentAnchor,
                 Horizon = horizon,
+                AnalysisHorizon = analysisHorizon,
                 ThetaMax = thetaMaxRad,
                 FrameSnapshot = frameSnapshot,
                 Terrain = terrain,
@@ -1548,15 +1881,18 @@ public static class TrajectoryOverlay
         /// skew of sampling the parent outside the seed's Gate acquisition is
         /// irrelevant.</summary>
         public double PeriodHintAt(TrajectoryPredictor predictor, double t,
-            StateVector? stateOverride = null)
+            StateVector? stateOverride = null,
+            RailsService.PredictionContext? predictionOverride = null,
+            string? bodyId = null)
         {
             StateVector state;
             if (stateOverride is { } known)
                 state = known;
             else
                 state = predictor.StateAt(t);
-            var parentAbs = Prediction.GetAbsolute(ParentBodyId, t);
-            return AdaptiveSampler.PeriodSeconds(Rails.MuOf(ParentBodyId),
+            string referenceBodyId = bodyId ?? ParentBodyId;
+            var parentAbs = (predictionOverride ?? Prediction).GetAbsolute(referenceBodyId, t);
+            return AdaptiveSampler.PeriodSeconds(Rails.MuOf(referenceBodyId),
                 state.Position - parentAbs.Position, state.Velocity - parentAbs.Velocity);
         }
 
@@ -1573,7 +1909,6 @@ public static class TrajectoryOverlay
             if (!OverlayKernel.FrameAllowsGeometryReuse(ActiveFrame)) return false;
             if (!OverlayKernel.ModeMatches(previous.FrameLabel, ActiveFrame?.Label)) return false;
             if (!string.Equals(previous.ParentId, ParentBodyId, StringComparison.Ordinal)) return false;
-            if (AnalysisWorkEnabled != previous.AnalysisRequested) return false;
             if (previous.SamplingThetaMax != ThetaMax
                 || previous.SamplingMaxDensePoints != MaxDensePoints) return false;
             if (previous.DenseTimes.Length < 2) return false;
@@ -1678,19 +2013,6 @@ public static class TrajectoryOverlay
                 denseTimes, densePositionsCce, times, positionsCce, count);
             object markerKey = MarkerCacheKey;
             var markers = OverlayKernel.VisibleMarkers(candidates, T0);
-            bool analysisCurrent = AnalysisWorkEnabled
-                && Ui.OrbitAnalyserPanel.RequestMatches(AnalysisRequestVersion)
-                && previous.AnalysisRequested;
-            var (analysis, analysisReason) = analysisCurrent
-                ? ComputeAnalysis(predictor, shouldStop)
-                : (null, (string?)null);
-            analysisCurrent &= Ui.OrbitAnalyserPanel.RequestMatches(
-                AnalysisRequestVersion);
-            if (!analysisCurrent)
-            {
-                analysis = null;
-                analysisReason = null;
-            }
             var denseMetrics = DecimationMetrics.For(
                 denseCoordinates ?? densePositionsCce);
             return previous with
@@ -1707,10 +2029,6 @@ public static class TrajectoryOverlay
                 Markers = markers,
                 MarkerCandidates = candidates,
                 MarkerCacheKey = markerKey,
-                Analysis = analysis,
-                AnalysisUnavailableReason = analysisReason,
-                AnalysisRequestVersion = analysisCurrent ? AnalysisRequestVersion : 0,
-                AnalysisRequested = analysisCurrent,
                 FrameCoordinates = futureCoordinates is null
                     ? null
                     : OverlayKernel.PadToStockLength(futureCoordinates.ToArray()),
@@ -1725,21 +2043,23 @@ public static class TrajectoryOverlay
             };
         }
 
-        private (OrbitAnalysisReport? Report, string? Reason) ComputeAnalysis(
-            TrajectoryPredictor predictor, Func<bool>? shouldStop = null)
+        internal readonly record struct AnalysisComputation(
+            OrbitAnalysisReport? Report, string? Reason, bool Completed);
+
+        internal AnalysisComputation ComputeAnalysis(
+            Func<bool>? shouldStop = null)
         {
             if (!Ui.OrbitAnalyserPanel.RequestMatches(AnalysisRequestVersion))
-                return (null, null);
-            if (!Rails.TryGetEquatorialPole(ParentBodyId, out var pole))
-                return (null, $"equatorial pole for '{ParentBodyId}' was not captured");
+                return new(null, null, false);
             double analysisStart = T0 + AnalysisStartOffsetSeconds;
             double requestedEnd = Math.Min(
-                analysisStart + AnalysisSpanSeconds, Horizon);
+                analysisStart + AnalysisSpanSeconds, AnalysisHorizon);
             if (requestedEnd <= analysisStart)
-                return (null, "requested interval starts beyond the available rails horizon");
+                return new(null,
+                    "requested interval starts beyond the available rails horizon", true);
 
             int pass = Ui.OrbitAnalyserPanel.BeginAnalysisPass(AnalysisRequestVersion);
-            if (pass == 0) return (null, null);
+            if (pass == 0) return new(null, null, false);
             bool completed = false;
             double lastProgress = -1;
             Ui.OrbitAnalyserPanel.AnalysisPhase lastPhase = default;
@@ -1758,53 +2078,105 @@ public static class TrajectoryOverlay
 
             try
             {
-                Progress(0, Ui.OrbitAnalyserPanel.AnalysisPhase.Propagating);
-                double propagationStart = predictor.Horizon;
-                double propagationSpan = Math.Max(1, requestedEnd - propagationStart);
-                predictor.ExtendTo(requestedEnd, time =>
+                // Overlay and analysis execute concurrently. The ephemerides snapshot
+                // is immutable and shareable, but GravityModel's segment caches are
+                // single-owner, so analysis needs its own prediction context.
+                var analysisPrediction = AnalysisPrediction!.ForkForConcurrentUse();
+                // Analysis owns a streaming predictor. Extending the display predictor
+                // across the whole interval first retained every integrator node and
+                // deterministically hit TrajectoryPredictor.MaxNodes around 18% of a
+                // ten-year low orbit. Advance a private coast in bounded chunks to a
+                // non-zero start offset, then let the chronological analysis sweep
+                // extend it on demand and prune accepted history behind itself.
+                var analysisPredictor = TrackedVessel.NewDisplayPredictorAt(
+                    CurrentAnchor, T0, analysisPrediction.Gravity);
+                double trajectorySpan = Math.Max(1, requestedEnd - T0);
+                Progress(0, analysisStart > T0
+                    ? Ui.OrbitAnalyserPanel.AnalysisPhase.Propagating
+                    : Ui.OrbitAnalyserPanel.AnalysisPhase.Sampling);
+                while (analysisPredictor.Horizon < analysisStart)
                 {
-                    if (StopRequested()) throw new OperationCanceledException();
-                    Progress(0.5 * (time - propagationStart) / propagationSpan,
-                        Ui.OrbitAnalyserPanel.AnalysisPhase.Propagating);
-                });
+                    double chunkEnd = Math.Min(
+                        analysisStart,
+                        analysisPredictor.Horizon + AnalysisPropagationChunkSeconds);
+                    analysisPredictor.ExtendTo(chunkEnd, time =>
+                    {
+                        if (StopRequested()) throw new OperationCanceledException();
+                        Progress(0.9 * (time - T0) / trajectorySpan,
+                            Ui.OrbitAnalyserPanel.AnalysisPhase.Propagating);
+                    });
+                    analysisPredictor.PruneBefore(chunkEnd);
+                }
                 if (StopRequested()) throw new OperationCanceledException();
 
-                Progress(0.5, Ui.OrbitAnalyserPanel.AnalysisPhase.Sampling);
-                double periodHint = PeriodHintAt(predictor, analysisStart);
+                if (!TryAnalysisStartBody(analysisPrediction, analysisPredictor, analysisStart,
+                        out string analysisBodyId, out string? ownershipError))
+                {
+                    completed = true;
+                    return new(null, ownershipError, true);
+                }
+                if (!Rails.TryGetEquatorialPole(analysisBodyId, out var pole))
+                {
+                    completed = true;
+                    return new(null,
+                        $"equatorial pole for '{analysisBodyId}' was not captured",
+                        true);
+                }
+
+                Progress(0.9 * (analysisStart - T0) / trajectorySpan,
+                    Ui.OrbitAnalyserPanel.AnalysisPhase.Sampling);
+                double periodHint = PeriodHintAt(
+                    analysisPredictor, analysisStart,
+                    predictionOverride: analysisPrediction,
+                    bodyId: analysisBodyId);
+                double maximumTurn = OrbitAnalysisSampler.ProductionTurnRadians(
+                    analysisStart, requestedEnd, periodHint);
                 var series = OrbitAnalysisSampler.Sample(time =>
                 {
-                    var vessel = StateAt(predictor, time);
-                    var parent = Prediction.GetAbsolute(ParentBodyId, time);
+                    var vessel = StateAt(analysisPredictor, time);
+                    var parent = analysisPrediction.GetAbsolute(analysisBodyId, time);
                     return (vessel.Position - parent.Position,
                         vessel.Velocity - parent.Velocity);
                 }, analysisStart, requestedEnd, periodHint, StopRequested,
-                    progress: fraction => Progress(0.5 + 0.4 * fraction,
-                        Ui.OrbitAnalyserPanel.AnalysisPhase.Sampling));
-                if (series.WorkLimited) return (null, null);
+                    maximumPoints: OrbitAnalysisSampler.ProductionMaximumPoints,
+                    progress: fraction => Progress(
+                        0.9 * ((analysisStart - T0)
+                            + fraction * (requestedEnd - analysisStart))
+                            / trajectorySpan,
+                        Ui.OrbitAnalyserPanel.AnalysisPhase.Sampling),
+                    maximumTurnRadians: maximumTurn,
+                    acceptedTime: analysisPredictor.PruneBefore);
+                if (series.WorkLimited) return new(null, null, false);
                 if (series.Times.Length < 3)
                 {
                     completed = true;
-                    return (null, "trajectory has fewer than three analysis samples");
+                    return new(null,
+                        "trajectory has fewer than three analysis samples", true);
                 }
-                if (!TryAnalysisEnd(series.Times, series.Positions, series.Times.Length,
-                        out double end, out string? transitionError))
+                if (!TryAnalysisEnd(analysisPrediction, analysisBodyId,
+                        series.Times, series.Positions, series.Times.Length,
+                        StopRequested,
+                        out double end, out AnalysisSoiTransition? transition,
+                        out string? transitionError))
                 {
                     completed = true;
-                    return (null, transitionError);
+                    return new(null, transitionError, true);
                 }
-                double? spin = Rails.TryGetAngularVelocity(ParentBodyId, out double rate)
+                double? spin = Rails.TryGetAngularVelocity(analysisBodyId, out double rate)
                     ? rate : null;
                 double analysisEnd = Math.Min(requestedEnd, end);
                 Progress(0.9, Ui.OrbitAnalyserPanel.AnalysisPhase.Reducing);
                 var report = OrbitAnalysisKernel.Analyze(
-                    ParentBodyId, series.Times, series.Positions, series.Velocities,
-                    analysisStart, analysisEnd, Rails.MuOf(ParentBodyId),
-                    Rails.MeanRadiusOf(ParentBodyId), pole, spin,
+                    analysisBodyId, series.Times, series.Positions, series.Velocities,
+                    analysisStart, analysisEnd, Rails.MuOf(analysisBodyId),
+                    Rails.MeanRadiusOf(analysisBodyId), pole, spin,
                     fraction => Progress(0.9 + 0.1 * fraction,
-                        Ui.OrbitAnalyserPanel.AnalysisPhase.Reducing));
+                        Ui.OrbitAnalyserPanel.AnalysisPhase.Reducing),
+                    StopRequested);
                 completed = true;
                 if (report is null)
-                    return (null, "future arc is too short or degenerate for orbit analysis");
+                    return new(null,
+                        "future arc is too short or degenerate for orbit analysis", true);
                 if (series.Truncated)
                 {
                     string note = series.DynamicsLimited
@@ -1812,7 +2184,17 @@ public static class TrajectoryOverlay
                         : "analysis ended before the requested interval";
                     report = report with { Notes = [.. report.Notes, note] };
                 }
-                return (report, null);
+                if (transition is { } soiTransition)
+                    report = report with
+                    {
+                        Notes =
+                        [
+                            .. report.Notes,
+                            $"analysis ended at transition from '{analysisBodyId}' "
+                                + $"to '{soiTransition.NewBodyId}' SOI",
+                        ],
+                    };
+                return new(report, null, true);
             }
             finally
             {
@@ -1822,40 +2204,83 @@ public static class TrajectoryOverlay
             }
         }
 
+        private bool TryAnalysisStartBody(RailsService.PredictionContext prediction,
+            TrajectoryPredictor predictor, double time, out string owner, out string? error)
+        {
+            owner = prediction.RootId;
+            error = null;
+            try
+            {
+                owner = AnalysisBodyAtStart(prediction.RootId,
+                    predictor.StateAt(time).Position,
+                    Rails.SoiChildrenOf,
+                    bodyId => prediction.GetAbsolute(bodyId, time).Position,
+                    Rails.SphereOfInfluenceOf);
+                return true;
+            }
+            catch (Exception e)
+            {
+                error = $"analysis-start SOI ownership check failed: {e.Message}";
+                return false;
+            }
+        }
+
         /// <summary>Independent, contained SOI cutoff for analysis. It deliberately
         /// does not consume display markers: an Ap/Pe/target-marker failure cannot
-        /// let old-parent elements leak beyond a sampled transition.</summary>
-        private bool TryAnalysisEnd(double[] times, Vector3d[] positions, int count,
-            out double end, out string? error)
+        /// let frozen-body elements leak beyond a sampled transition.</summary>
+        private bool TryAnalysisEnd(RailsService.PredictionContext prediction,
+            string analysisBodyId, double[] times, Vector3d[] positions, int count,
+            Func<bool>? shouldStop,
+            out double end, out AnalysisSoiTransition? transition, out string? error)
         {
             end = count > 0 ? times[count - 1] : T0;
+            transition = null;
             error = null;
             if (count < 2) return true;
             try
             {
-                var children = Rails.SoiChildrenOf(ParentBodyId);
-                var members = new List<string>(children.Count + 1) { ParentBodyId };
+                var children = Rails.SoiChildrenOf(analysisBodyId);
+                var members = new List<string>(children.Count + 1) { analysisBodyId };
                 members.AddRange(children);
-                var distances = members.ToDictionary(id => id, _ => new double[count],
-                    StringComparer.Ordinal);
-                for (int i = 0; i < count; i++)
+                var startStates = new StateVector[members.Count];
+                var endStates = new StateVector[members.Count];
+                var sweptChildren = new SoiReparentKernel.SweptCandidate[children.Count];
+                var childSois = new double[children.Count];
+                for (int child = 0; child < children.Count; child++)
+                    childSois[child] = Rails.SphereOfInfluenceOf(children[child]);
+                prediction.GetAbsoluteMany(members, times[0], startStates);
+                double bodySoi = Rails.SphereOfInfluenceOf(analysisBodyId);
+                string? parentBodyId = Rails.ParentIdOf(analysisBodyId);
+                for (int i = 0; i + 1 < count; i++)
                 {
-                    var states = Prediction.GetAbsoluteMany(members, times[i]);
-                    var vessel = positions[i] + states[0].Position;
-                    for (int k = 0; k < members.Count; k++)
-                        distances[members[k]][i] = (vessel - states[k].Position).Length();
+                    if ((i & 255) == 0 && shouldStop?.Invoke() == true)
+                        throw new OperationCanceledException();
+                    prediction.GetAbsoluteMany(members, times[i + 1], endStates);
+                    for (int child = 0; child < children.Count; child++)
+                        sweptChildren[child] = new(children[child],
+                            positions[i] + startStates[0].Position
+                                - startStates[child + 1].Position,
+                            positions[i + 1] + endStates[0].Position
+                                - endStates[child + 1].Position,
+                            childSois[child]);
+                    if (SoiReparentKernel.FirstCrossing(
+                            positions[i], positions[i + 1], bodySoi,
+                            parentBodyId, sweptChildren) is { } crossing)
+                    {
+                        end = times[i]
+                            + (times[i + 1] - times[i]) * crossing.Fraction;
+                        transition = new(end, crossing.NewParentId);
+                        return true;
+                    }
+                    (startStates, endStates) = (endStates, startStates);
                 }
-                var transitions = OverlayKernel.FindSoiTransitions(ParentBodyId, count,
-                    Rails.ParentIdOf,
-                    owner => string.Equals(owner, ParentBodyId, StringComparison.Ordinal) ? children : [],
-                    Rails.SphereOfInfluenceOf, body => distances[body], maxTransitions: 1);
-                if (transitions.Count > 0)
-                {
-                    var found = transitions[0];
-                    end = times[found.Lo]
-                        + (times[found.Lo + 1] - times[found.Lo]) * found.Frac;
-                }
+                if (shouldStop?.Invoke() == true)
+                    throw new OperationCanceledException();
                 return true;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception e)
             {
@@ -1883,10 +2308,9 @@ public static class TrajectoryOverlay
         /// sample.</summary>
         public OverlaySamples SampleBatch(TrajectoryPredictor predictor, double start,
             double periodHint, double captureSimSeconds,
-            bool includeAnalysis, Func<bool>? shouldStop = null,
+            Func<bool>? shouldStop = null,
             StateVector? anchorStateOverride = null, double? horizonOverride = null)
         {
-            includeAnalysis &= Ui.OrbitAnalyserPanel.RequestMatches(AnalysisRequestVersion);
             StateVector anchorState = anchorStateOverride ?? StateAt(predictor, T0);
             bool frameAttempted = FrameSnapshot is not null;
             bool framesOk = frameAttempted;
@@ -2039,15 +2463,6 @@ public static class TrajectoryOverlay
                     Rails, Prediction, ActiveFrame, ParentBodyId, T0, MarkerWorkEnabled, Target,
                     denseTimes, densePositionsCce, times, positionsCce, count)
                 : [];
-            var (analysis, analysisReason) = includeAnalysis
-                ? ComputeAnalysis(predictor, shouldStop)
-                : (null, (string?)null);
-            includeAnalysis &= Ui.OrbitAnalyserPanel.RequestMatches(AnalysisRequestVersion);
-            if (!includeAnalysis)
-            {
-                analysis = null;
-                analysisReason = null;
-            }
             if (collisionMarker is not null)
             {
                 // The cut endpoint IS the impact; the extremum/crossing candidates were
@@ -2087,10 +2502,10 @@ public static class TrajectoryOverlay
                 Markers = markers,
                 MarkerCandidates = markerCandidates,
                 MarkerCacheKey = this.MarkerCacheKey,
-                Analysis = analysis,
-                AnalysisUnavailableReason = analysisReason,
-                AnalysisRequestVersion = includeAnalysis ? AnalysisRequestVersion : 0,
-                AnalysisRequested = includeAnalysis,
+                Analysis = null,
+                AnalysisUnavailableReason = null,
+                AnalysisRequestVersion = 0,
+                AnalysisRequested = false,
                 FrameCoordinates = coordinates is null ? null : OverlayKernel.PadToStockLength(coordinates),
                 FrameLabel = frameLabel,
                 DenseTimes = denseTimes,

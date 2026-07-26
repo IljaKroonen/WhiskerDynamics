@@ -61,11 +61,8 @@ public sealed class RailsService : IDisposable
     /// <summary>Test-only pause after a new flight is published and its direct-owner
     /// admission is recorded, while the lifecycle gate still excludes Dispose.</summary>
     internal Action? ThirdBodyRefreshLifecycleBoundaryForTest { get; set; }
-    private SegmentedEphemeridesSnapshot? _predictionSnapshot;
-    private PredictionContext? _predictionContext;
-    private double _predictionRequestedFrom = double.PositiveInfinity;
-    private double _predictionRequestedTo = double.NegativeInfinity;
-    private PredictionSnapshotBuild? _predictionSnapshotBuild;
+    private readonly PredictionSnapshotChannel _displayPredictionSnapshots = new();
+    private readonly PredictionSnapshotChannel _analysisPredictionSnapshots = new();
     private const long PredictionSnapshotBudgetMsPerCycle = 2;
     private const int PredictionSnapshotCycleHandoffMs = 1;
     private const double PredictionSnapshotChunkSeconds =
@@ -140,6 +137,21 @@ public sealed class RailsService : IDisposable
         public double CaptureTo = captureTo;
         public double Next = from;
         public readonly List<SegmentedEphemeridesSnapshot> Chunks = [];
+    }
+
+    /// <summary>Independent request/build/publication state for one snapshot consumer.
+    /// Display and long-horizon analysis deliberately use different instances: widening
+    /// an analysis request must never lengthen the build that ordinary line refreshes
+    /// are waiting to publish.</summary>
+    private sealed class PredictionSnapshotChannel
+    {
+        public SegmentedEphemeridesSnapshot? Snapshot;
+        public PredictionContext? Context;
+        public double RequestedFrom = double.PositiveInfinity;
+        public double RequestedTo = double.NegativeInfinity;
+        public PredictionSnapshotBuild? Build;
+        public int LifecycleVersion;
+        public bool Active;
     }
 
     public static RailsService CreateFromGameData(ModConfig config, GameConstants constants,
@@ -332,6 +344,35 @@ public sealed class RailsService : IDisposable
     {
         get { lock (Gate) return _ephemerides.SnapshotStableThrough; }
     }
+    internal (double From, double To) PredictionSnapshotRequestForTest(bool analysis)
+    {
+        lock (Gate)
+        {
+            var channel = analysis
+                ? _analysisPredictionSnapshots
+                : _displayPredictionSnapshots;
+            return (channel.RequestedFrom, channel.RequestedTo);
+        }
+    }
+
+    internal (int Version, bool Active, int BuildChunks)
+        AnalysisPredictionSnapshotLifecycleForTest
+    {
+        get
+        {
+            lock (Gate)
+                return (_analysisPredictionSnapshots.LifecycleVersion,
+                    _analysisPredictionSnapshots.Active,
+                    _analysisPredictionSnapshots.Build?.Chunks.Count ?? 0);
+        }
+    }
+
+    internal void CaptureAnalysisPredictionSnapshotChunkForTest()
+    {
+        lock (Gate)
+            _ = CapturePredictionSnapshotChunkUnderGate(
+                _analysisPredictionSnapshots);
+    }
 
     internal static CelestialBody[] SelectVesselGravitySources(
         IReadOnlyList<CelestialBody> bodies) =>
@@ -516,19 +557,26 @@ public sealed class RailsService : IDisposable
         throw new InvalidOperationException();
     }
 
+    /// <summary>How many days ahead of <paramref name="nowSeconds"/> the rails have
+    /// actually integrated, without applying the map-display target. Long-running
+    /// analysis uses this wider retained window without changing how far map lines
+    /// are shown.</summary>
+    public double IntegratedAheadDays(double nowSeconds)
+    {
+        ThrowIfAuthorityFaulted();
+        double horizon;
+        lock (Gate) horizon = _ephemerides.Horizon;
+        return Math.Max(0.0, (horizon - nowSeconds) / 86400.0);
+    }
+
     /// <summary>THE rails-availability clamp (one home — every display/authoring path
     /// that promises trajectory data must go through it): how many days ahead of
     /// <paramref name="nowSeconds"/> the rails have ACTUALLY integrated, capped at the
     /// config target. While a raised orbits window grows chunk by chunk this trails
     /// the target and the consumers grow with it — sampling or authoring past the
     /// reached horizon would demand a synchronous Gate-held extension instead.</summary>
-    public double AvailableAheadDays(double nowSeconds)
-    {
-        ThrowIfAuthorityFaulted();
-        double horizon;
-        lock (Gate) horizon = _ephemerides.Horizon;
-        return Math.Min(_config.RailsAheadDays, Math.Max(0.0, (horizon - nowSeconds) / 86400.0));
-    }
+    public double AvailableAheadDays(double nowSeconds) =>
+        Math.Min(_config.RailsAheadDays, IntegratedAheadDays(nowSeconds));
 
     /// <summary>A lock-free view for one background prediction owner. Capture is short
     /// and Gate-bound; every later body/gravity query is detached from live rails. The
@@ -570,8 +618,17 @@ public sealed class RailsService : IDisposable
         public StateVector[] GetAbsoluteMany(IReadOnlyList<string> ids, double time)
         {
             var states = new StateVector[ids.Count];
-            for (int i = 0; i < ids.Count; i++) states[i] = GetAbsolute(ids[i], time);
+            GetAbsoluteMany(ids, time, states);
             return states;
+        }
+
+        internal void GetAbsoluteMany(IReadOnlyList<string> ids, double time,
+            Span<StateVector> states)
+        {
+            if (states.Length < ids.Count)
+                throw new ArgumentException("absolute-state destination is too short");
+            for (int i = 0; i < ids.Count; i++)
+                states[i] = GetAbsolute(ids[i], time);
         }
 
         public StateVector GetGameEcl(string id, double time)
@@ -608,8 +665,64 @@ public sealed class RailsService : IDisposable
             double from = Math.Max(fromTime, _ephemerides.StartTime);
             double to = Math.Min(toTime, _ephemerides.Horizon);
             if (!(to > from)) throw new ArgumentOutOfRangeException(nameof(toTime));
-            return TryCapturePredictionContextUnderGate(from, to);
+            return TryCapturePredictionContextUnderGate(
+                _displayPredictionSnapshots, from, to);
         }
+    }
+
+    /// <summary>Returns an immutable context from the versioned analysis-only snapshot
+    /// channel, or records bounds for that request version and returns null. Keeping
+    /// this lifecycle separate prevents a multi-year analysis copy from extending the
+    /// display build or surviving a changed/closed analyser request.</summary>
+    internal PredictionContext? TryCaptureAnalysisPredictionContext(
+        double fromTime, double toTime, int requestVersion)
+    {
+        ThrowIfAuthorityFaulted();
+        ValidatePredictionRange(fromTime, toTime);
+        lock (Gate)
+        {
+            var channel = _analysisPredictionSnapshots;
+            if (requestVersion < channel.LifecycleVersion
+                || (requestVersion == channel.LifecycleVersion && !channel.Active))
+                return null;
+            if (requestVersion > channel.LifecycleVersion)
+                UpdateAnalysisPredictionRequestUnderGate(requestVersion, active: true);
+            double from = Math.Max(fromTime, _ephemerides.StartTime);
+            double to = Math.Min(toTime, _ephemerides.Horizon);
+            if (!(to > from)) throw new ArgumentOutOfRangeException(nameof(toTime));
+            return TryCapturePredictionContextUnderGate(
+                channel, from, to);
+        }
+    }
+
+    /// <summary>Advances the analyser snapshot lifecycle immediately when its atomic
+    /// UI request changes. Superseded bounds, partial chunks, and published contexts
+    /// are released together; an older capture racing a close cannot resurrect them
+    /// because lifecycle versions only advance.</summary>
+    internal void UpdateAnalysisPredictionRequest(int requestVersion, bool active)
+    {
+        lock (Gate)
+        {
+            var channel = _analysisPredictionSnapshots;
+            if (requestVersion < channel.LifecycleVersion
+                || (requestVersion == channel.LifecycleVersion
+                    && channel.Active == active))
+                return;
+            UpdateAnalysisPredictionRequestUnderGate(requestVersion, active);
+        }
+    }
+
+    private void UpdateAnalysisPredictionRequestUnderGate(
+        int requestVersion, bool active)
+    {
+        var channel = _analysisPredictionSnapshots;
+        channel.Snapshot = null;
+        channel.Context = null;
+        channel.RequestedFrom = double.PositiveInfinity;
+        channel.RequestedTo = double.NegativeInfinity;
+        channel.Build = null;
+        channel.LifecycleVersion = requestVersion;
+        channel.Active = active;
     }
 
     /// <summary>Returns a job-private prediction context when the cached immutable
@@ -629,7 +742,8 @@ public sealed class RailsService : IDisposable
             // declared domain and merely defer the failure to a background thread.
             if (fromTime < _ephemerides.StartTime || toTime > _ephemerides.Horizon)
                 return null;
-            shared = TryCapturePredictionContextUnderGate(fromTime, toTime);
+            shared = TryCapturePredictionContextUnderGate(
+                _displayPredictionSnapshots, fromTime, toTime);
         }
         return shared?.ForkForConcurrentUse();
     }
@@ -643,13 +757,14 @@ public sealed class RailsService : IDisposable
 
     /// <summary>Gate-held cache lookup/request aggregation over already-normalized
     /// exact bounds.</summary>
-    private PredictionContext? TryCapturePredictionContextUnderGate(double from, double to)
+    private static PredictionContext? TryCapturePredictionContextUnderGate(
+        PredictionSnapshotChannel channel, double from, double to)
     {
-        var snapshot = _predictionSnapshot;
+        var snapshot = channel.Snapshot;
         if (snapshot is not null && snapshot.StartTime <= from && snapshot.Horizon >= to)
-            return _predictionContext;
-        _predictionRequestedFrom = Math.Min(_predictionRequestedFrom, from);
-        _predictionRequestedTo = Math.Max(_predictionRequestedTo, to);
+            return channel.Context;
+        channel.RequestedFrom = Math.Min(channel.RequestedFrom, from);
+        channel.RequestedTo = Math.Max(channel.RequestedTo, to);
         return null;
     }
 
@@ -663,7 +778,7 @@ public sealed class RailsService : IDisposable
     /// giving gameplay threads a real handoff window before later worker activity. A
     /// 40-year request advances over successive cycles; one indivisible one-day slice
     /// may overrun the soft wall-clock budget.</summary>
-    private void RefreshPredictionSnapshot()
+    private void RefreshPredictionSnapshot(PredictionSnapshotChannel channel)
     {
         var budget = System.Diagnostics.Stopwatch.StartNew();
         while (!_stop.IsCancellationRequested)
@@ -672,10 +787,11 @@ public sealed class RailsService : IDisposable
             bool captured;
             int chunkCount;
             lock (Gate)
-                (completed, captured, chunkCount) = CapturePredictionSnapshotChunkUnderGate();
+                (completed, captured, chunkCount) =
+                    CapturePredictionSnapshotChunkUnderGate(channel);
 
             if (captured) PredictionSnapshotChunkCapturedForTest?.Invoke(chunkCount);
-            if (completed is not null) PublishPredictionSnapshot(completed);
+            if (completed is not null) PublishPredictionSnapshot(channel, completed);
             if (!captured) return;
             if (budget.ElapsedMilliseconds >= PredictionSnapshotBudgetMsPerCycle)
             {
@@ -689,30 +805,30 @@ public sealed class RailsService : IDisposable
     /// <summary>Captures one bounded slice and returns the build once all of its
     /// requested coverage (including reuse margin) is present. Caller holds Gate.</summary>
     private (PredictionSnapshotBuild? Completed, bool Captured, int ChunkCount)
-        CapturePredictionSnapshotChunkUnderGate()
+        CapturePredictionSnapshotChunkUnderGate(PredictionSnapshotChannel channel)
     {
-        if (!(_predictionRequestedTo > _predictionRequestedFrom))
+        if (!(channel.RequestedTo > channel.RequestedFrom))
             return (null, false, 0);
 
-        double from = Math.Max(_predictionRequestedFrom, _ephemerides.StartTime);
-        double to = Math.Min(_predictionRequestedTo, _ephemerides.Horizon);
+        double from = Math.Max(channel.RequestedFrom, _ephemerides.StartTime);
+        double to = Math.Min(channel.RequestedTo, _ephemerides.Horizon);
         if (!(to > from))
         {
-            if (_predictionRequestedTo <= _ephemerides.StartTime)
+            if (channel.RequestedTo <= _ephemerides.StartTime)
             {
                 // A warp/prune moved the whole queued display request out of
                 // retention. Drop its partial immutable chunks; the next display
                 // frame will enqueue its newly clamped live window.
-                _predictionRequestedFrom = double.PositiveInfinity;
-                _predictionRequestedTo = double.NegativeInfinity;
-                _predictionSnapshotBuild = null;
+                channel.RequestedFrom = double.PositiveInfinity;
+                channel.RequestedTo = double.NegativeInfinity;
+                channel.Build = null;
             }
             return (null, false, 0);
         }
         double margin = Math.Max(3600.0, (to - from) * 0.05);
         double captureTo = Math.Min(_ephemerides.Horizon, to + margin);
 
-        var build = _predictionSnapshotBuild;
+        var build = channel.Build;
         if (build is null || from < build.From
             || build.Next < _ephemerides.StartTime)
         {
@@ -722,7 +838,7 @@ public sealed class RailsService : IDisposable
             // clamp a fresh display caller observes. Exact solver callers reject the
             // now-unavailable original bound before consulting this cache.
             build = new PredictionSnapshotBuild(from, captureTo);
-            _predictionSnapshotBuild = build;
+            channel.Build = build;
         }
         else if (captureTo > build.CaptureTo)
         {
@@ -762,7 +878,8 @@ public sealed class RailsService : IDisposable
 
     /// <summary>Joins immutable slice references without Gate, then atomically swaps
     /// the published cache if this is still the worker's active build.</summary>
-    private void PublishPredictionSnapshot(PredictionSnapshotBuild build)
+    private void PublishPredictionSnapshot(
+        PredictionSnapshotChannel channel, PredictionSnapshotBuild build)
     {
         var snapshot = SegmentedEphemeridesSnapshot.Combine(build.Chunks);
         var context = new PredictionContext(
@@ -770,18 +887,18 @@ public sealed class RailsService : IDisposable
         PredictionSnapshotBeforePublishForTest?.Invoke();
         lock (Gate)
         {
-            if (!ReferenceEquals(_predictionSnapshotBuild, build)) return;
-            _predictionSnapshot = snapshot;
-            _predictionContext = context;
-            _predictionSnapshotBuild = null;
+            if (!ReferenceEquals(channel.Build, build)) return;
+            channel.Snapshot = snapshot;
+            channel.Context = context;
+            channel.Build = null;
 
-            double from = Math.Max(_predictionRequestedFrom, _ephemerides.StartTime);
-            double to = Math.Min(_predictionRequestedTo, _ephemerides.Horizon);
+            double from = Math.Max(channel.RequestedFrom, _ephemerides.StartTime);
+            double to = Math.Min(channel.RequestedTo, _ephemerides.Horizon);
             if (!(to > from)
                 || (snapshot.StartTime <= from && snapshot.Horizon >= to))
             {
-                _predictionRequestedFrom = double.PositiveInfinity;
-                _predictionRequestedTo = double.NegativeInfinity;
+                channel.RequestedFrom = double.PositiveInfinity;
+                channel.RequestedTo = double.NegativeInfinity;
             }
         }
     }
@@ -1569,7 +1686,11 @@ public sealed class RailsService : IDisposable
                 lock (Gate)
                     _ephemerides.Prune(RetentionCutoffSeconds(
                         now, _config.RailsKeepBehindDays));
-                RefreshPredictionSnapshot();
+                // Display always gets first service. A multi-year analysis build uses
+                // an independent accumulator and advances only after any ordinary
+                // line-refresh request has had its own bounded publication pass.
+                RefreshPredictionSnapshot(_displayPredictionSnapshots);
+                RefreshPredictionSnapshot(_analysisPredictionSnapshots);
                 // Honest orbit lines: celestial curve sampling (~1 Hz internally,
                 // always-on while enabled; frame mode iff a frame is active). Strictly
                 // OUTSIDE the Gate: the sampling path takes it internally per lookup —
