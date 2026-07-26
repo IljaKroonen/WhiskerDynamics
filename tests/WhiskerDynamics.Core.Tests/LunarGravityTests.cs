@@ -27,6 +27,43 @@ public class LunarGravityTests
     }
 
     [Fact]
+    public void Shipping_lunar_frame_maps_DE430_Apollo_11_coordinates_from_MER_to_PA()
+    {
+        var frame = Assert.IsType<BodyFixedToModelRotation>(
+            TestGravityModels.LunarSettings().BodyFixedToModel);
+        var meanEarth = new Vector3d(1_591_748.076, 691_220.843, 20_398.420);
+        var expectedPrincipalAxes =
+            new Vector3d(1_591_966.550, 690_699.375, 21_003.866);
+
+        var actual = frame.ToModelCoordinates(meanEarth);
+
+        Assert.True((actual - expectedPrincipalAxes).Length() < 0.002,
+            $"expected {expectedPrincipalAxes}; actual {actual}");
+    }
+
+    [Fact]
+    public void Model_frame_rotation_transforms_positions_and_accelerations()
+    {
+        var frame = new BodyFixedToModelRotation(
+            new Vector3d(0, 1, 0),
+            new Vector3d(-1, 0, 0),
+            new Vector3d(0, 0, 1));
+        var coefficient = new SphericalHarmonicCoefficient(2, 2, 2e-5, -3e-6);
+        var raw = new Geopotential(1_738_000,
+            Rotation with { AngularVelocity = 0 }, [coefficient]);
+        var aligned = new Geopotential(1_738_000,
+            Rotation with { AngularVelocity = 0 }, [coefficient], frame);
+        var bodyFixedPosition = new Vector3d(1_850_000, 300_000, 100_000);
+
+        var expected = frame.ToBodyFixedCoordinates(raw.AccelerationCorrection(
+            frame.ToModelCoordinates(bodyFixedPosition), 4.9028e12, 0));
+        var actual = aligned.AccelerationCorrection(
+            bodyFixedPosition, 4.9028e12, 0);
+
+        Assert.True((actual - expected).Length() < 1e-15);
+    }
+
+    [Fact]
     public void Tesseral_field_rotates_with_the_body_fixed_prime_meridian()
     {
         const double mu = 4.9028000661637961e12;
@@ -70,14 +107,14 @@ public class LunarGravityTests
         var cases = new[]
         {
             (new Vector3d(1_838_000, 0, 0), 86_400.0,
-                new Vector3d(-0.0004519824716866268, 0.0001552257297299237,
-                    0.0004515560514025811)),
+                new Vector3d(-0.00045285796255546565, 0.00015524438418501813,
+                    0.0004516063378703262)),
             (new Vector3d(1_300_000, -700_000, 1_100_000), 12_345.0,
-                new Vector3d(0.00011228314843202769, 0.0012826578940147457,
-                    -0.0009560821002349254)),
+                new Vector3d(0.00011785279784101333, 0.001280908864880584,
+                    -0.000954818684776579)),
             (new Vector3d(250_000, 400_000, 1_775_000), 864_000.0,
-                new Vector3d(-0.00023775579809807426, 0.0003854987130596389,
-                    0.0005500731314008429)),
+                new Vector3d(-0.00023698664875704582, 0.00038572168038309546,
+                    0.0005514793560242237)),
         };
 
         foreach (var (position, time, expected) in cases)

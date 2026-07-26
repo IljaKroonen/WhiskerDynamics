@@ -36,6 +36,7 @@ public sealed record SphericalHarmonicGravitySettings : ExtendedGravitySettings
     public double? ReferenceRadiusM { get; }
     public int MaximumDegree { get; }
     public SphericalHarmonicNormalization Normalization { get; }
+    public BodyFixedToModelRotation? BodyFixedToModel { get; }
     public IReadOnlyList<SphericalHarmonicCoefficient> Coefficients => _coefficientView;
 
     public SphericalHarmonicGravitySettings(
@@ -43,7 +44,8 @@ public sealed record SphericalHarmonicGravitySettings : ExtendedGravitySettings
         double? referenceRadiusM,
         int maximumDegree,
         SphericalHarmonicNormalization normalization,
-        IEnumerable<SphericalHarmonicCoefficient> coefficients)
+        IEnumerable<SphericalHarmonicCoefficient> coefficients,
+        BodyFixedToModelRotation? bodyFixedToModel = null)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new FormatException("spherical-harmonic model name cannot be empty");
@@ -87,6 +89,7 @@ public sealed record SphericalHarmonicGravitySettings : ExtendedGravitySettings
         ReferenceRadiusM = referenceRadiusM;
         MaximumDegree = maximumDegree;
         Normalization = normalization;
+        BodyFixedToModel = bodyFixedToModel;
         _coefficientView = Array.AsReadOnly(_coefficients);
     }
 
@@ -96,8 +99,10 @@ public sealed record SphericalHarmonicGravitySettings : ExtendedGravitySettings
         var selected = _coefficients.TakeWhile(
             coefficient => coefficient.Degree <= MaximumDegree);
         return Normalization == SphericalHarmonicNormalization.FullyNormalized
-            ? Geopotential.FromFullyNormalized(radius, RequireRotation(body), selected)
-            : new Geopotential(radius, RequireRotation(body), selected);
+            ? Geopotential.FromFullyNormalized(
+                radius, RequireRotation(body), selected, BodyFixedToModel)
+            : new Geopotential(
+                radius, RequireRotation(body), selected, BodyFixedToModel);
     }
 
     public override string Description =>
@@ -278,7 +283,8 @@ public sealed class BodySettingsCatalog
             gravity.ReferenceRadiusM,
             maximumDegree,
             normalization,
-            coefficients);
+            coefficients,
+            BodyFixedToModelRotationJson.Parse(gravity.BodyFixedToModel));
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -310,6 +316,7 @@ public sealed class BodySettingsCatalog
         public string? Normalization { get; set; }
         public double? ReferenceRadiusM { get; set; }
         public int? MaximumDegree { get; set; }
+        public JsonElement BodyFixedToModel { get; set; }
         public JsonElement Coefficients { get; set; }
     }
 }
