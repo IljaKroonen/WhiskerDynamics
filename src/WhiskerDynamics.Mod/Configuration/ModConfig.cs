@@ -1,7 +1,6 @@
 using System.Globalization;
 using Tomlet;
 using Tomlet.Attributes;
-using WhiskerDynamics.Core;
 
 namespace WhiskerDynamics.Mod.Configuration;
 
@@ -33,20 +32,6 @@ public sealed class ModConfig
     // Physics. Mu values always come from the game's constants; these are tolerances.
     [TomlProperty("rails_rel_tol")] public double RailsRelTol { get; set; } = 1e-11;
     [TomlProperty("vessel_rel_tol")] public double VesselRelTol { get; set; } = 1e-11;
-    // GRGM1200A truncation used for Luna's body-fixed mascon field. Degree 30 is the
-    // shipping gameplay balance; degree 50 preserves maximum local detail at higher cost.
-    [TomlProperty("lunar_gravity_model")]
-    public string LunarGravityModel { get; set; } = "degree30";
-
-    internal LunarGravityFidelity SelectedLunarGravityFidelity => LunarGravityModel switch
-    {
-        "degree10" => LunarGravityFidelity.Degree10,
-        "degree20" => LunarGravityFidelity.Degree20,
-        "degree30" => LunarGravityFidelity.Degree30,
-        "degree40" => LunarGravityFidelity.Degree40,
-        "degree50" => LunarGravityFidelity.Degree50,
-        _ => LunarGravityFidelity.Degree30,
-    };
     // Session-only orbit horizons start at 30 days on every process launch. The panel
     // changes them together in memory; the rails window retains its 30-day floor.
     [TomlNonSerialized] public double RailsAheadDays { get; set; } = 30;
@@ -163,10 +148,6 @@ public sealed class ModConfig
     private void NormalizePhysics(List<ConfigRepair> repairs)
     {
         // Physics values are repaired before consumers observe the shared config.
-        string rawLunarGravityModel = LunarGravityModel ?? "";
-        LunarGravityModel = Repair(repairs, "lunar_gravity_model", rawLunarGravityModel,
-            NormalizeLunarGravityModel(rawLunarGravityModel),
-            "one of degree10, degree20, degree30, degree40, degree50; invalid uses degree30");
         RailsRelTol = Repair(repairs, "rails_rel_tol", RailsRelTol,
             FiniteClamp(RailsRelTol, 1e-14, 1e-6, 1e-11),
             "finite [1e-14, 1e-6], non-finite uses 1e-11");
@@ -273,15 +254,4 @@ public sealed class ModConfig
         && value <= MaxCanaryToleranceMeters
             ? value
             : DefaultCanaryToleranceMeters;
-
-    private static string NormalizeLunarGravityModel(string value) =>
-        value.Trim().ToLowerInvariant() switch
-        {
-            "degree10" => "degree10",
-            "degree20" => "degree20",
-            "degree30" => "degree30",
-            "degree40" => "degree40",
-            "degree50" => "degree50",
-            _ => "degree30",
-        };
 }

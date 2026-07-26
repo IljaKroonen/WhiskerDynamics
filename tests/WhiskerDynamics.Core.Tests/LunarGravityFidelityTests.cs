@@ -10,13 +10,13 @@ public class LunarGravityFidelityTests(ITestOutputHelper output)
         2.6616995e-6, 0);
 
     [Theory]
-    [InlineData(LunarGravityFidelity.Degree10, 10, 63)]
-    [InlineData(LunarGravityFidelity.Degree20, 20, 228)]
-    [InlineData(LunarGravityFidelity.Degree30, 30, 493)]
-    [InlineData(LunarGravityFidelity.Degree40, 40, 858)]
-    [InlineData(LunarGravityFidelity.Degree50, 50, 1323)]
-    public void Catalog_build_applies_selected_lunar_fidelity(
-        LunarGravityFidelity fidelity, int expectedDegree, int expectedCoefficients)
+    [InlineData(10, 63)]
+    [InlineData(20, 228)]
+    [InlineData(30, 493)]
+    [InlineData(40, 858)]
+    [InlineData(50, 1323)]
+    public void Settings_catalog_applies_selected_lunar_fidelity(
+        int maximumDegree, int expectedCoefficients)
     {
         const double gravitationalConstant = 6.67430e-11;
         const double solarMass = 1.98847e30;
@@ -27,13 +27,16 @@ public class LunarGravityFidelityTests(ITestOutputHelper output)
             new Vector3d(orbitalRadius, 0, 0),
             new Vector3d(0, Math.Sqrt(gravitationalConstant * solarMass / orbitalRadius), 0),
             Rotation);
+        var settings = new BodySettingsCatalog(
+            [new BodySettings(new BodyMatch("Luna", "Sol"),
+                TestGravityModels.LunarSettings(maximumDegree))]);
 
         IReadOnlyList<CelestialBody> bodies = CatalogKernel.Build(
-            [sol, luna], gravitationalConstant, out var diagnostics, fidelity);
+            [sol, luna], gravitationalConstant, out var diagnostics, settings);
         CelestialBody body = Assert.Single(bodies, candidate => candidate.Id == "Luna");
 
         Assert.Empty(diagnostics);
-        Assert.Equal(expectedDegree, body.Geopotential!.Degree);
+        Assert.Equal(maximumDegree, body.Geopotential!.Degree);
         Assert.Equal(expectedCoefficients, body.Geopotential.Coefficients.Count);
 
         var relative = new Vector3d(1_838_000, 0, 0);
@@ -49,11 +52,11 @@ public class LunarGravityFidelityTests(ITestOutputHelper output)
     [Fact]
     public void Reduced_models_have_expected_size_and_representative_two_day_orbit_drift()
     {
-        var degree50 = LunarGravityModel.Create(Rotation, LunarGravityFidelity.Degree50);
-        var degree40 = LunarGravityModel.Create(Rotation, LunarGravityFidelity.Degree40);
-        var degree30 = LunarGravityModel.Create(Rotation, LunarGravityFidelity.Degree30);
-        var degree20 = LunarGravityModel.Create(Rotation, LunarGravityFidelity.Degree20);
-        var degree10 = LunarGravityModel.Create(Rotation, LunarGravityFidelity.Degree10);
+        var degree50 = TestGravityModels.Lunar(Rotation, 50);
+        var degree40 = TestGravityModels.Lunar(Rotation, 40);
+        var degree30 = TestGravityModels.Lunar(Rotation, 30);
+        var degree20 = TestGravityModels.Lunar(Rotation, 20);
+        var degree10 = TestGravityModels.Lunar(Rotation, 10);
 
         Assert.Equal((50, 1323), (degree50.Degree, degree50.Coefficients.Count));
         Assert.Equal((40, 858), (degree40.Degree, degree40.Coefficients.Count));

@@ -31,16 +31,19 @@ public static class CatalogKernel
 
     /// <summary>Builds the celestial graph. Invalid individual bodies are skipped and
     /// reported through <paramref name="diagnostics"/>. Duplicate ids or an invalid root
-    /// count throw <see cref="FormatException"/>. Output preserves catalog order.</summary>
+    /// count throw <see cref="FormatException"/>. Game-catalog values are authoritative;
+    /// matched body settings only attach an extended gravity model. Output preserves
+    /// catalog order.</summary>
     public static IReadOnlyList<CelestialBody> Build(
         IReadOnlyList<CatalogBody> catalog, double gravitationalConstant,
         out IReadOnlyList<string> diagnostics) =>
-        Build(catalog, gravitationalConstant, out diagnostics, LunarGravityFidelity.Degree50);
+        Build(catalog, gravitationalConstant, out diagnostics, BodySettingsCatalog.Empty);
 
     public static IReadOnlyList<CelestialBody> Build(
         IReadOnlyList<CatalogBody> catalog, double gravitationalConstant,
-        out IReadOnlyList<string> diagnostics, LunarGravityFidelity lunarGravityFidelity)
+        out IReadOnlyList<string> diagnostics, BodySettingsCatalog settingsCatalog)
     {
+        ArgumentNullException.ThrowIfNull(settingsCatalog);
         var diags = new List<string>();
         diagnostics = diags;
 
@@ -71,8 +74,7 @@ public static class CatalogKernel
                 Mu = rootMu,
                 MeanRadius = root.MeanRadiusM,
                 SphereOfInfluence = root.SphereOfInfluenceM,
-                Geopotential = KnownGeopotentials.ForBody(
-                    root.Id, root.Rotation, lunarGravityFidelity),
+                Geopotential = settingsCatalog.CreateGeopotential(root),
             },
         };
 
@@ -89,7 +91,7 @@ public static class CatalogKernel
             foreach (var child in childrenOf[parentId])
             {
                 if (TryConvert(child, parent, gravitationalConstant, diags,
-                    lunarGravityFidelity) is { } body)
+                    settingsCatalog) is { } body)
                 {
                     built[child.Id] = body;
                     pending.Enqueue(child.Id);
@@ -113,8 +115,8 @@ public static class CatalogKernel
     }
 
     private static CelestialBody? TryConvert(
-        CatalogBody body, CelestialBody parent, double gravitationalConstant, List<string> diags,
-        LunarGravityFidelity lunarGravityFidelity)
+        CatalogBody body, CelestialBody parent, double gravitationalConstant,
+        List<string> diags, BodySettingsCatalog settingsCatalog)
     {
         if (body.RelPositionEcl is not { } position || body.RelVelocityEcl is not { } velocity)
         {
@@ -226,8 +228,7 @@ public static class CatalogKernel
             Mu = bodyMu,
             MeanRadius = body.MeanRadiusM,
             SphereOfInfluence = body.SphereOfInfluenceM,
-            Geopotential = KnownGeopotentials.ForBody(
-                body.Id, body.Rotation, lunarGravityFidelity),
+            Geopotential = settingsCatalog.CreateGeopotential(body),
             Parent = parent,
             Orbit = elements,
         };

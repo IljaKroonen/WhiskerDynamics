@@ -35,6 +35,10 @@ public class SpaceDockBundleScriptTests
             Directory.CreateDirectory(publishDirectory);
             foreach (string name in RequiredPublishFiles.Concat(pdbFiles))
                 File.WriteAllText(Path.Combine(publishDirectory, name), name);
+            string bodySettings = Path.Combine(publishDirectory, "body-settings");
+            Directory.CreateDirectory(bodySettings);
+            foreach (string name in new[] { "Earth.json", "Luna.json" })
+                File.WriteAllText(Path.Combine(bodySettings, name), name);
             File.WriteAllText(modTomlPath, "mod manifest");
             File.WriteAllText(licensePath, "license");
             File.WriteAllText(thirdPartyNoticesPath, "third-party notices");
@@ -77,6 +81,7 @@ public class SpaceDockBundleScriptTests
             string[] expectedEntries = RequiredPublishFiles
                 .Concat(["mod.toml", "LICENSE", "THIRD-PARTY-NOTICES"])
                 .Concat(pdbFiles)
+                .Concat(["body-settings/Earth.json", "body-settings/Luna.json"])
                 .Select(name => $"WhiskerDynamics/{name}")
                 .Order()
                 .ToArray();
@@ -89,7 +94,6 @@ public class SpaceDockBundleScriptTests
             Assert.All(archive.Entries, entry =>
             {
                 Assert.StartsWith("WhiskerDynamics/", entry.FullName);
-                Assert.DoesNotContain('/', entry.FullName["WhiskerDynamics/".Length..]);
                 Assert.DoesNotContain('\\', entry.FullName);
                 Assert.Equal(
                     new DateTimeOffset(1980, 1, 1, 0, 0, 0, TimeSpan.Zero),

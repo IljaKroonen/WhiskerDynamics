@@ -11,7 +11,7 @@ public class LunarGravityTests
     [Fact]
     public void Built_in_lunar_field_is_PDS_GRGM1200A_50x50()
     {
-        var field = KnownGeopotentials.ForBody("Luna", Rotation)!;
+        var field = TestGravityModels.Lunar(Rotation);
 
         Assert.Equal(50, field.Degree);
         Assert.Equal(1323, field.Coefficients.Count);
@@ -49,7 +49,7 @@ public class LunarGravityTests
     public void Full_lunar_field_is_finite_at_and_near_the_poles()
     {
         const double mu = 4.9028000661637961e12;
-        var field = KnownGeopotentials.ForBody("Luna", Rotation)!;
+        var field = TestGravityModels.Lunar(Rotation);
         foreach (var p in new[]
         {
             new Vector3d(0, 0, 1_838_000),
@@ -66,7 +66,7 @@ public class LunarGravityTests
     public void Full_lunar_field_matches_regression_vectors()
     {
         const double mu = 4.9028000661637961e12;
-        var field = KnownGeopotentials.ForBody("Luna", Rotation)!;
+        var field = TestGravityModels.Lunar(Rotation);
         var cases = new[]
         {
             (new Vector3d(1_838_000, 0, 0), 86_400.0,
@@ -93,7 +93,7 @@ public class LunarGravityTests
     {
         const double mu = 4.9028000661637961e12;
         const double radius = 1_838_000;
-        var field = KnownGeopotentials.ForBody("Luna", Rotation)!;
+        var field = TestGravityModels.Lunar(Rotation);
         var exact = field.AccelerationCorrection(new Vector3d(0, 0, radius), mu, 12345);
         foreach (double longitude in new[] { 0.0, 0.7, 2.1, 4.8 })
         {

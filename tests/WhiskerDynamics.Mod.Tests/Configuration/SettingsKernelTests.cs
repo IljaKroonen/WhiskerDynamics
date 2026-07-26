@@ -224,7 +224,6 @@ public class SettingsKernelTests
         {
             Enabled = true,
             RailsRelTol = 1e-11,
-            LunarGravityModel = "degree30",
             OverlayHorizonDays = 75,
             CelestialCurveDays = 75,
         };
@@ -232,7 +231,6 @@ public class SettingsKernelTests
         {
             Enabled = false,
             RailsRelTol = 1e-7,
-            LunarGravityModel = "degree50",
             OverlayHorizonDays = 400,
             CelestialCurveDays = 400,
             RailsKeepBehindDays = 12,
@@ -256,7 +254,6 @@ public class SettingsKernelTests
             RuntimeSettingsSnapshot.Capture(config));
         Assert.True(config.Enabled);
         Assert.Equal(1e-11, config.RailsRelTol);
-        Assert.Equal("degree30", config.LunarGravityModel);
         Assert.Equal(75, config.OverlayHorizonDays);
         Assert.Equal(75, config.CelestialCurveDays);
     }

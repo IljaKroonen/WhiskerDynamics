@@ -76,7 +76,7 @@ public class NumericalPrecisionTradeoffTests(ITestOutputHelper output)
 
         var rotation = new BodyRotation(new Vector3d(0, 0, 1), new Vector3d(1, 0, 0),
             new Vector3d(0, 1, 0), 2.6616995e-6, 0);
-        var degree50 = LunarGravityModel.Create(rotation);
+        var degree50 = TestGravityModels.Lunar(rotation);
         var degree20 = new Geopotential(degree50.ReferenceRadius, rotation,
             degree50.Coefficients.Where(c => c.Degree <= 20));
         var degree10 = new Geopotential(degree50.ReferenceRadius, rotation,

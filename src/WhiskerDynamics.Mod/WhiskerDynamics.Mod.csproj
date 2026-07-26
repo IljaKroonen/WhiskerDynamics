@@ -20,6 +20,11 @@
     <InternalsVisibleTo Include="WhiskerDynamics.Benchmarks" />
   </ItemGroup>
   <ItemGroup>
+    <None Update="BodySettings\*.json" TargetPath="body-settings\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <Reference Include="KSA"><HintPath>$(KsaInstallDir)\KSA.dll</HintPath><Private>false</Private></Reference>
     <!-- Compile-only: reading a nozzle part's assembly transform for directional
          RCS performance crosses a KSA Part metadata signature that mentions Bepu. -->

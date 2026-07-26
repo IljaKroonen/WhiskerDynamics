@@ -1,6 +1,7 @@
 using HarmonyLib;
 using WhiskerDynamics.Compatibility;
 using WhiskerDynamics.Compatibility.Patching;
+using WhiskerDynamics.Core;
 using WhiskerDynamics.Mod.Patching;
 
 namespace WhiskerDynamics.Mod;
@@ -59,6 +60,21 @@ public static class ModMain
         bool panelOk = PatchValidator.ValidateAll(panelPatchSet.Targets, out var panelMismatches);
         if (panelOk) HarmonyPatchActivation.Apply(harmony, panelPatchSet.PatchTypes[0]);
         else foreach (var m in panelMismatches) ModLog.Error($"panel target moved: {m}");
+
+        try
+        {
+            string bodySettingsPath = Path.Combine(modDir, "body-settings");
+            ModServices.BodySettings = BodySettingsCatalog.LoadDirectory(bodySettingsPath);
+            ModLog.Info($"loaded {ModServices.BodySettings.Entries.Count} body settings "
+                + $"from {bodySettingsPath}");
+        }
+        catch (Exception e)
+        {
+            ModServices.Mismatches = [e.Message];
+            ModServices.Status = ModStatus.DisabledIncompatible;
+            ModLog.Error($"body settings catalog failed to load; running stock: {e}");
+            return;
+        }
 
         if (!GameBuildPolicy.IsVerified(gameVersion))
         {

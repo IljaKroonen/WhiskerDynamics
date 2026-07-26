@@ -142,22 +142,35 @@ public sealed class RailsService : IDisposable
         public readonly List<SegmentedEphemeridesSnapshot> Chunks = [];
     }
 
-    public static RailsService CreateFromGameData(ModConfig config, GameConstants constants) =>
-        CreateFromGameData(config, constants, celestialSamplingForTest: null);
+    public static RailsService CreateFromGameData(ModConfig config, GameConstants constants,
+        BodySettingsCatalog bodySettings) =>
+        CreateFromGameData(config, constants, bodySettings, celestialSamplingForTest: null);
 
-    internal static RailsService CreateFromGameData(ModConfig config, GameConstants constants,
+    internal static RailsService CreateFromGameData(
+        ModConfig config, GameConstants constants, BodySettingsCatalog bodySettings,
         Action<CancellationToken>? celestialSamplingForTest)
     {
         ModConfig.LogRepairs(config.NormalizeWorkload(), "rails service creation");
         // The running system is the only production catalog authority.
         var catalog = LiveCatalog.SnapshotCurrentSystem(out string systemId);
         var bodies = CatalogKernel.Build(catalog, constants.G, out var skipped,
-            config.SelectedLunarGravityFidelity);
+            bodySettings);
         if (skipped.Count != 0)
             throw new FormatException("live celestial catalog cannot be modeled completely: "
                 + string.Join("; ", skipped));
         string catalogSource = $"live system '{systemId}'";
-        ModLog.Info($"lunar gravity model: {config.LunarGravityModel}");
+        var matchedSettings = catalog
+            .Select(body => bodySettings.Match(body))
+            .Where(settings => settings is not null)
+            .Cast<BodySettings>()
+            .ToHashSet();
+        foreach (var settings in matchedSettings.OrderBy(
+            entry => entry.Match.Id, StringComparer.Ordinal))
+            ModLog.Info($"body settings: {settings.Match.Id} matched {settings.Source}; "
+                + $"gravity {settings.GravityModel.Description}");
+        foreach (var settings in bodySettings.Entries.Where(
+            entry => !matchedSettings.Contains(entry)))
+            ModLog.Warn($"body settings: {settings.Source} did not match the live catalog");
         var root = bodies.Single(b => b.Parent is null);
 
         // Every eligible finite-mass body joins the mutually coupled system. Zero-mu

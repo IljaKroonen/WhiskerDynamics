@@ -21,22 +21,48 @@ public class CatalogKernelTests
     private static CatalogBody Root(string id = "Sol", double massKg = SolMassKg) =>
         new(id, massKg, ParentId: null, MeanRadiusM: 696342e3, RelPositionEcl: null, RelVelocityEcl: null);
 
+    private static SphericalHarmonicGravitySettings J2(
+        double value, double? referenceRadiusM = null) => new(
+        "test J2", referenceRadiusM, 2, SphericalHarmonicNormalization.Unnormalized,
+        [new SphericalHarmonicCoefficient(2, 0, -value, 0)]);
+
     [Fact]
-    public void Known_J2_body_gets_C20_field_when_catalog_supplies_its_pole()
+    public void Matched_J2_settings_attach_field_without_replacing_game_catalog_values()
     {
         var rotation = new BodyRotation(new Vector3d(0, 0, 1), new Vector3d(1, 0, 0),
             new Vector3d(0, 1, 0), 7.292115e-5, 0);
         var earth = new CatalogBody("Earth", 5.9722e24, null, 6_371_000, null, null, rotation);
+        var settings = new BodySettingsCatalog(
+            [new BodySettings(new BodyMatch("Earth"),
+                J2(1.08262668e-3, 6_378_137))]);
 
-        var body = Assert.Single(CatalogKernel.Build([earth], G, out var diagnostics));
+        var body = Assert.Single(CatalogKernel.Build(
+            [earth], G, out var diagnostics, settings));
 
         Assert.Empty(diagnostics);
+        Assert.Equal(G * earth.MassKg, body.Mu);
+        Assert.Equal(earth.MeanRadiusM, body.MeanRadius);
         Assert.NotNull(body.Geopotential);
         var c20 = Assert.Single(body.Geopotential.Coefficients);
+        Assert.Equal(6_378_137, body.Geopotential.ReferenceRadius);
         Assert.Equal((2, 0), (c20.Degree, c20.Order));
         Assert.True(c20.Cosine < 0);
     }
 
+
+    [Fact]
+    public void Unmatched_game_catalog_body_keeps_point_mass_default()
+    {
+        var body = Assert.Single(CatalogKernel.Build(
+            [Root("Unconfigured")], G, out var diagnostics,
+            new BodySettingsCatalog(
+                [new BodySettings(new BodyMatch("Elsewhere"), J2(0.01))])));
+
+        Assert.Empty(diagnostics);
+        Assert.Null(body.Geopotential);
+        Assert.Equal(G * SolMassKg, body.Mu);
+        Assert.Equal(696342e3, body.MeanRadius);
+    }
     private static CatalogBody FromElements(string id, double massKg, string parentId,
         in OrbitalElements elements, double parentMu, double meanRadiusM = 2.4e6)
     {
