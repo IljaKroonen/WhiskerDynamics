@@ -44,6 +44,7 @@ public class OrbitAnalysisPresentationModelTests
     {
         var presentation = OrbitAnalysisPresentationModel.Create(Report(), 0, 1000);
 
+        Assert.Equal("Earth", presentation.BodyId);
         Assert.Equal("undefined",
             presentation.Summary.Single(row => row.Label == "Mean Pe").Value);
         Assert.Equal("not resolved",
@@ -54,6 +55,23 @@ public class OrbitAnalysisPresentationModelTests
         Assert.Equal("undefined", apoapsis.Range);
         Assert.Equal("undefined",
             presentation.Elements.Single(row => row.Label == "LAN").Mean);
+    }
+
+    [Fact]
+    public void Panel_title_names_the_reference_body_without_changing_window_identity()
+    {
+        const string hiddenId = "###WhiskerDynamicsOrbitAnalysis";
+
+        string waiting = OrbitAnalyserPanel.WindowTitle(null);
+        string earth = OrbitAnalyserPanel.WindowTitle("Earth");
+        string moon = OrbitAnalyserPanel.WindowTitle("Moon");
+
+        Assert.Equal("Orbit Analysis" + hiddenId, waiting);
+        Assert.Equal("Orbit Analysis — Earth" + hiddenId, earth);
+        Assert.Equal("Orbit Analysis — Moon" + hiddenId, moon);
+        Assert.EndsWith(hiddenId, waiting);
+        Assert.EndsWith(hiddenId, earth);
+        Assert.EndsWith(hiddenId, moon);
     }
 
     [Fact]

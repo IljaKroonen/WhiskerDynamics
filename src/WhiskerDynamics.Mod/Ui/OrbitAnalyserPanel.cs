@@ -49,6 +49,10 @@ public static class OrbitAnalyserPanel
 
     private static Request ReadRequest() => Volatile.Read(ref _request);
 
+    private static void NotifyPredictionRequest(Request request) =>
+        ModServices.Rails?.UpdateAnalysisPredictionRequest(
+            request.Version, request.Open);
+
     internal static void Open()
     {
         while (true)
@@ -57,7 +61,10 @@ public static class OrbitAnalyserPanel
             if (current.Open) return;
             var next = current with { Open = true, Version = current.Version + 1 };
             if (ReferenceEquals(Interlocked.CompareExchange(ref _request, next, current), current))
+            {
+                NotifyPredictionRequest(next);
                 return;
+            }
         }
     }
 
@@ -69,7 +76,10 @@ public static class OrbitAnalyserPanel
             if (!current.Open) break;
             var next = current with { Open = false, Version = current.Version + 1 };
             if (ReferenceEquals(Interlocked.CompareExchange(ref _request, next, current), current))
+            {
+                NotifyPredictionRequest(next);
                 break;
+            }
         }
         DurationField.ResetSessionStatics();
         OverlayBuffer.StripAnalysis();
@@ -158,6 +168,22 @@ public static class OrbitAnalyserPanel
             : new(version, 0, 0, AnalysisPhase.Waiting, false);
     }
 
+    internal static string WindowTitle(string? referenceBodyId) =>
+        string.IsNullOrEmpty(referenceBodyId)
+            ? "Orbit Analysis###WhiskerDynamicsOrbitAnalysis"
+            : $"Orbit Analysis — {referenceBodyId}###WhiskerDynamicsOrbitAnalysis";
+
+    private static string? CompletedReferenceBodyForTitle()
+    {
+        var controlled = KSA.Program.ControlledVehicle;
+        if (controlled is null) return null;
+        var request = ReadRequest();
+        var samples = OverlayBuffer.Read(controlled.Id);
+        return samples?.AnalysisRequestVersion == request.Version
+            ? samples.Analysis?.BodyId
+            : null;
+    }
+
     internal static void SetInterval(double startOffsetSeconds, double spanSeconds)
     {
         double clampedStart = Math.Clamp(startOffsetSeconds, 0.0, MaximumIntervalSeconds);
@@ -172,15 +198,20 @@ public static class OrbitAnalyserPanel
                 Version = current.Version + 1,
             };
             if (ReferenceEquals(Interlocked.CompareExchange(ref _request, next, current), current))
+            {
+                NotifyPredictionRequest(next);
                 break;
+            }
         }
         _formattedReport = null;
     }
     internal static void ResetSessionStatics()
     {
         var current = ReadRequest();
-        Volatile.Write(ref _request, new Request(false, 0.0, 7 * SecondsPerDay,
-            current.Version + 1));
+        var reset = new Request(false, 0.0, 7 * SecondsPerDay,
+            current.Version + 1);
+        Volatile.Write(ref _request, reset);
+        NotifyPredictionRequest(reset);
         DurationField.ResetSessionStatics();
         _errors = 0;
         _firstDrawLogged = false;
@@ -204,7 +235,8 @@ public static class OrbitAnalyserPanel
             if (!ModServices.Enabled || !ModServices.EnsureBound(out _)) return;
             UiTheme.PrepareWindow(680f, 780f, 620f, 420f);
             bool open = true;
-            bool visible = ImGui.Begin("Whisker Dynamics: Orbit Analysis"u8, ref open);
+            bool visible = ImGui.Begin(
+                WindowTitle(CompletedReferenceBodyForTitle()), ref open);
             try
             {
                 if (!open || !visible) return;
@@ -289,7 +321,7 @@ public static class OrbitAnalyserPanel
                 UiLayout.NextProperty("Duration");
                 changed |= DurationField.Row("##analysisspan"u8, "analysis span", 0,
                     ref span, SpanSteps, out spanError, years: true);
-                ImGui.SetItemTooltip("analysis interval length; longer spans take proportionally longer; changing either field restarts the analysis; enter y/d/h/m/s; clamps to [1m, 40y] and to the trajectory actually available"u8);
+                ImGui.SetItemTooltip("analysis interval length, independent of the map's Orbit look-ahead; longer spans take proportionally longer; changing either field restarts the analysis; enter y/d/h/m/s; clamps to [1m, 40y] and to rails coverage actually available"u8);
             }
             finally
             {
@@ -336,6 +368,7 @@ public static class OrbitAnalyserPanel
         DrawAnalysisState((float)progress.Fraction,
             $"{ProgressLabel(progress)} | last result covered {presentation.CoveredInterval}");
         ImGui.Text("Report below is from the last completed pass");
+        ImGui.Text($"Reference body: {presentation.BodyId}");
         ImGui.Text(presentation.Description);
         ImGui.Text($"Requested {presentation.RequestedInterval}");
 

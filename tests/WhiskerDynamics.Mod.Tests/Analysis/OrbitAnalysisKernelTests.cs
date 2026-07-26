@@ -221,6 +221,46 @@ public class OrbitAnalysisKernelTests
     }
 
     [Fact]
+    public void Reduction_cooperatively_cancels_during_a_large_series()
+    {
+        const double a = 7_000_000;
+        double period = 2 * Math.PI / Math.Sqrt(Mu / (a * a * a));
+        var (times, positions, velocities) = Ellipse(a, 0.03, Degrees(40), 0, 0,
+            0, 0, 30 * period, 1200);
+        int polls = 0;
+
+        Assert.Throws<OperationCanceledException>(() =>
+            OrbitAnalysisKernel.Analyze("Earth", times, positions, velocities,
+                0, times[^1], Mu, EarthRadius, Pole,
+                shouldStop: () => ++polls >= 2));
+        Assert.Equal(2, polls);
+    }
+
+    [Fact]
+    public void Report_reduction_keeps_polling_after_the_primary_point_scan()
+    {
+        const double a = 7_000_000;
+        double period = 2 * Math.PI / Math.Sqrt(Mu / (a * a * a));
+        var (times, positions, velocities) = Ellipse(a, 0.03, Degrees(40), 0, 0,
+            0, 0, 30 * period, 1200);
+        bool primaryScanComplete = false;
+        int reductionPolls = 0;
+
+        Assert.Throws<OperationCanceledException>(() =>
+            OrbitAnalysisKernel.Analyze("Earth", times, positions, velocities,
+                0, times[^1], Mu, EarthRadius, Pole,
+                progress: progress => primaryScanComplete |= progress == 1,
+                shouldStop: () =>
+                {
+                    if (!primaryScanComplete) return false;
+                    reductionPolls++;
+                    return true;
+                }));
+
+        Assert.Equal(1, reductionPolls);
+    }
+
+    [Fact]
     public void Refuses_degenerate_or_too_short_series()
     {
         Assert.Null(OrbitAnalysisKernel.Analyze("Earth", [0, 1],

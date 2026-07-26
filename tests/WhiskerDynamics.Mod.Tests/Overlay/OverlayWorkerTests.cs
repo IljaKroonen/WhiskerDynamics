@@ -48,10 +48,29 @@ public class KeyedLatestQueueTests
     {
         var queue = NewQueue();
         bool ran = false;
-        queue.Enqueue("stale-session", () => ran = true);
+        bool discarded = false;
+        queue.Enqueue("stale-session", () => ran = true, () => discarded = true);
         queue.Clear();
         Assert.Equal(0, queue.Drain());
         Assert.False(ran);
+        Assert.True(discarded);
+    }
+
+    [Fact]
+    public void Replacement_and_cancel_discard_each_pending_job_once()
+    {
+        var queue = NewQueue();
+        int firstDiscarded = 0;
+        int secondDiscarded = 0;
+        queue.Enqueue("v", static () => { }, () => firstDiscarded++);
+        queue.Enqueue("v", static () => { }, () => secondDiscarded++);
+
+        Assert.Equal(1, firstDiscarded);
+        Assert.Equal(0, secondDiscarded);
+
+        queue.Cancel("v");
+        Assert.Equal(1, firstDiscarded);
+        Assert.Equal(1, secondDiscarded);
     }
 
     [Fact]
@@ -237,6 +256,72 @@ public class KeyedLatestQueueTests
 [Collection(nameof(OrbitCacheCoordinationTestCollection))]
 public sealed class OverlayWorkerAdmissionTests
 {
+    [Fact]
+    public async Task Session_reset_takes_analysis_queue_gate_before_overlay_queue_gate()
+    {
+        OverlayWorker.ResetSessionStatics();
+        Task<bool>? enqueue = null;
+        using var enqueueStarted = new ManualResetEventSlim();
+        string key = "reset-lock-order-" + Guid.NewGuid().ToString("N");
+
+        OverlayWorker.ResetSessionStatics(() =>
+        {
+            int generation = OverlayWorker.CurrentGeneration;
+            enqueue = Task.Factory.StartNew(() =>
+            {
+                enqueueStarted.Set();
+                return OverlayAnalysisWorker.Enqueue(
+                    key, generation, static () => true, static (_, _) => { });
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
+            Assert.True(enqueueStarted.Wait(TimeSpan.FromSeconds(5)));
+            Assert.False(enqueue.Wait(TimeSpan.FromMilliseconds(100)));
+        });
+
+        Assert.NotNull(enqueue);
+        Assert.True(await enqueue.WaitAsync(TimeSpan.FromSeconds(5)));
+        OverlayAnalysisWorker.Cancel(key);
+    }
+
+    [Fact]
+    public void Blocking_analysis_does_not_block_the_overlay_worker()
+    {
+        TrajectoryOverlay.ResetSessionStatics();
+        int generation = OverlayWorker.CurrentGeneration;
+        using var analysisStarted = new ManualResetEventSlim();
+        using var releaseAnalysis = new ManualResetEventSlim();
+        using var analysisFinished = new ManualResetEventSlim();
+        using var overlayRan = new ManualResetEventSlim();
+        string suffix = Guid.NewGuid().ToString("N");
+
+        Assert.True(OverlayAnalysisWorker.Enqueue(
+            "analysis-isolation-" + suffix, generation, static () => true,
+            (_, _) =>
+            {
+                analysisStarted.Set();
+                try
+                {
+                    Assert.True(releaseAnalysis.Wait(TimeSpan.FromSeconds(5)));
+                }
+                finally
+                {
+                    analysisFinished.Set();
+                }
+            }));
+        Assert.True(analysisStarted.Wait(TimeSpan.FromSeconds(5)));
+        try
+        {
+            Assert.True(OverlayWorker.Enqueue(
+                "overlay-isolation-" + suffix, generation, overlayRan.Set));
+            Assert.True(overlayRan.Wait(TimeSpan.FromSeconds(2)));
+        }
+        finally
+        {
+            releaseAnalysis.Set();
+            Assert.True(analysisFinished.Wait(TimeSpan.FromSeconds(5)));
+        }
+    }
+
     [Fact]
     public async Task Old_producer_resuming_after_reset_cannot_replace_new_pending_job()
     {

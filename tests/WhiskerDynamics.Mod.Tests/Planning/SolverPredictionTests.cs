@@ -190,6 +190,56 @@ public sealed class SolverPredictionTests : IDisposable
     }
 
     [Fact]
+    public void Long_analysis_request_does_not_widen_the_display_snapshot_accumulator()
+    {
+        lock (_rails.Gate)
+        {
+            Assert.Null(_rails.TryCapturePredictionContext(
+                RequestedFrom, RequestedTo));
+            Assert.Null(_rails.TryCaptureAnalysisPredictionContext(
+                RequestedFrom, ReadyThrough, requestVersion: 1));
+
+            Assert.Equal((RequestedFrom, RequestedTo),
+                _rails.PredictionSnapshotRequestForTest(analysis: false));
+            Assert.Equal((RequestedFrom, ReadyThrough),
+                _rails.PredictionSnapshotRequestForTest(analysis: true));
+        }
+    }
+
+    [Fact]
+    public void Superseded_analysis_build_is_replaced_and_close_rejects_stale_capture()
+    {
+        _rails.PredictionSnapshotChunkSecondsForTest = 2_500.0;
+        lock (_rails.Gate)
+        {
+            _rails.UpdateAnalysisPredictionRequest(10, active: true);
+            Assert.Null(_rails.TryCaptureAnalysisPredictionContext(
+                RequestedFrom, ReadyThrough, requestVersion: 10));
+            _rails.CaptureAnalysisPredictionSnapshotChunkForTest();
+            Assert.True(
+                _rails.AnalysisPredictionSnapshotLifecycleForTest.BuildChunks > 0);
+
+            _rails.UpdateAnalysisPredictionRequest(11, active: true);
+            Assert.Equal((11, true, 0),
+                _rails.AnalysisPredictionSnapshotLifecycleForTest);
+            Assert.Equal((double.PositiveInfinity, double.NegativeInfinity),
+                _rails.PredictionSnapshotRequestForTest(analysis: true));
+            Assert.Null(_rails.TryCaptureAnalysisPredictionContext(
+                RequestedFrom, RequestedTo, requestVersion: 11));
+            Assert.Equal((RequestedFrom, RequestedTo),
+                _rails.PredictionSnapshotRequestForTest(analysis: true));
+
+            _rails.UpdateAnalysisPredictionRequest(12, active: false);
+            Assert.Equal((12, false, 0),
+                _rails.AnalysisPredictionSnapshotLifecycleForTest);
+            Assert.Null(_rails.TryCaptureAnalysisPredictionContext(
+                RequestedFrom, RequestedTo, requestVersion: 11));
+            Assert.Equal((double.PositiveInfinity, double.NegativeInfinity),
+                _rails.PredictionSnapshotRequestForTest(analysis: true));
+        }
+    }
+
+    [Fact]
     public async Task Snapshot_preparation_releases_gate_between_bounded_chunks_and_publishes_once()
     {
         Assert.Equal(ThreadPriority.BelowNormal, _rails.WorkerPriorityForTest);

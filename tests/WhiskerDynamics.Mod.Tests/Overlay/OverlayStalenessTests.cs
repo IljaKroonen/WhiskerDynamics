@@ -1176,6 +1176,18 @@ public class OverlayBufferTests
         DenseMetricsCce = DecimationMetrics.For([default, default]),
     };
 
+    private static void AssertAnalysisStripped(
+        OverlaySamples geometry, OverlaySamples? retained)
+    {
+        var batch = Assert.IsType<OverlaySamples>(retained);
+        Assert.Same(geometry.DenseTimes, batch.DenseTimes);
+        Assert.Same(geometry.DensePositionsCce, batch.DensePositionsCce);
+        Assert.Null(batch.Analysis);
+        Assert.Null(batch.AnalysisUnavailableReason);
+        Assert.Equal(0, batch.AnalysisRequestVersion);
+        Assert.False(batch.AnalysisRequested);
+    }
+
     [Fact]
     public void Limit_note_distinguishes_dynamics_limits_from_point_caps()
     {
@@ -1270,6 +1282,32 @@ public class OverlayBufferTests
     }
 
     [Fact]
+    public void Continuity_revocation_retains_geometry_but_strips_analysis()
+    {
+        string id = nameof(Continuity_revocation_retains_geometry_but_strips_analysis);
+        OrbitAnalyserPanel.ResetSessionStatics();
+        OverlayBuffer.ResetSessionStatics();
+        OrbitAnalyserPanel.Open();
+        try
+        {
+            Assert.True(OrbitAnalyserPanel.TryGetRequest(
+                out _, out _, out int requestVersion));
+            var geometry = Batch(id);
+            OverlayBuffer.Publish(geometry);
+            Assert.True(OverlayBuffer.TryPublishAnalysis(
+                id, requestVersion, null, null, OverlayWorker.CurrentGeneration));
+
+            OverlayBuffer.RevokeVessel(id, clearSamples: false);
+            AssertAnalysisStripped(geometry, OverlayBuffer.Read(id));
+        }
+        finally
+        {
+            OrbitAnalyserPanel.ResetSessionStatics();
+            OverlayBuffer.ResetSessionStatics();
+        }
+    }
+
+    [Fact]
     public void Optimizer_line_lease_is_identity_scoped_and_does_not_refresh_consumers()
     {
         string id = nameof(Optimizer_line_lease_is_identity_scoped_and_does_not_refresh_consumers);
@@ -1301,6 +1339,39 @@ public class OverlayBufferTests
         OverlayBuffer.EndLineLease(lease);
         Assert.False(OverlayBuffer.LineSamplesUsable(
             id, replacement, planned: false, nowMs: 9000, nowSimSeconds: 100));
+    }
+
+    [Fact]
+    public void Analysis_publication_advances_optimizer_line_lease_to_updated_samples()
+    {
+        string id = nameof(Analysis_publication_advances_optimizer_line_lease_to_updated_samples);
+        OrbitAnalyserPanel.ResetSessionStatics();
+        OverlayBuffer.ResetSessionStatics();
+        OrbitAnalyserPanel.Open();
+        try
+        {
+            Assert.True(OrbitAnalyserPanel.TryGetRequest(
+                out _, out _, out int requestVersion));
+            var geometry = Batch(id);
+            OverlayBuffer.Publish(geometry);
+            var lease = OverlayBuffer.BeginLineLease(
+                id, OverlayWorker.CurrentGeneration, nowMs: 10);
+
+            Assert.True(OverlayBuffer.TryPublishAnalysis(
+                id, requestVersion, report: null, reason: null,
+                generation: OverlayWorker.CurrentGeneration));
+            var updated = OverlayBuffer.Read(id)!;
+            Assert.NotSame(geometry, updated);
+
+            OverlayBuffer.RenewLineLease(lease, nowMs: 5000);
+            Assert.True(OverlayBuffer.LineSamplesUsable(
+                id, updated, planned: false, nowMs: 9000, nowSimSeconds: 100));
+        }
+        finally
+        {
+            OrbitAnalyserPanel.ResetSessionStatics();
+            OverlayBuffer.ResetSessionStatics();
+        }
     }
 
     [Fact]
@@ -1399,6 +1470,94 @@ public class OverlayBufferTests
         Assert.False(OverlayBuffer.ClearPlannedIfCurrent(id, generation - 1));
         Assert.Same(current, OverlayBuffer.Read(id));
         Assert.Same(currentPlanned, OverlayBuffer.ReadPlanned(id));
+    }
+
+    [Fact]
+    public void Analysis_publication_and_carry_forward_ignore_geometry_reparenting()
+    {
+        string id = nameof(Analysis_publication_and_carry_forward_ignore_geometry_reparenting);
+        OrbitAnalyserPanel.ResetSessionStatics();
+        OverlayBuffer.ResetSessionStatics();
+        OrbitAnalyserPanel.Open();
+        try
+        {
+            Assert.True(OrbitAnalyserPanel.TryGetRequest(
+                out _, out _, out int requestVersion));
+            OverlayBuffer.Publish(Batch(id) with { ParentId = "Terra" });
+            OverlayBuffer.Publish(Batch(id) with { ParentId = "Luna" });
+            var report = new OrbitAnalysisReport
+            {
+                BodyId = "Luna",
+                StartTimeSeconds = 10,
+                EndTimeSeconds = 20,
+                SampleCount = 3,
+                EstimatedRevolutions = 0.1,
+                Elements = new(default, default, default, default, default),
+                Trend = [],
+                Notes = [],
+            };
+
+            Assert.True(OverlayBuffer.TryPublishAnalysis(
+                id, requestVersion, report, null, OverlayWorker.CurrentGeneration));
+            Assert.Same(report, OverlayBuffer.Read(id)!.Analysis);
+
+            OverlayBuffer.Publish(Batch(id) with { ParentId = "Terra" });
+            var carried = OverlayBuffer.Read(id)!;
+            Assert.Equal("Terra", carried.ParentId);
+            Assert.Same(report, carried.Analysis);
+            Assert.Equal(requestVersion, carried.AnalysisRequestVersion);
+        }
+        finally
+        {
+            OrbitAnalyserPanel.ResetSessionStatics();
+            OverlayBuffer.ResetSessionStatics();
+        }
+    }
+
+    [Fact]
+    public void Analysed_restamp_preserves_a_newer_concurrent_analysis_publication()
+    {
+        string id = nameof(Analysed_restamp_preserves_a_newer_concurrent_analysis_publication);
+        OrbitAnalyserPanel.ResetSessionStatics();
+        OverlayBuffer.ResetSessionStatics();
+        OrbitAnalyserPanel.Open();
+        try
+        {
+            Assert.True(OrbitAnalyserPanel.TryGetRequest(
+                out _, out _, out int requestVersion));
+            OverlayBuffer.Publish(Batch(id));
+            var staleReport = Report("Terra", 10);
+            Assert.True(OverlayBuffer.TryPublishAnalysis(
+                id, requestVersion, staleReport, null, OverlayWorker.CurrentGeneration));
+            var stale = OverlayBuffer.Read(id)!;
+
+            var newerReport = Report("Terra", 20);
+            Assert.True(OverlayBuffer.TryPublishAnalysis(
+                id, requestVersion, newerReport, null, OverlayWorker.CurrentGeneration));
+            OverlayBuffer.Publish(stale.WithFreshStamp(777));
+
+            var restamped = OverlayBuffer.Read(id)!;
+            Assert.Equal(777, restamped.SampleWallMs);
+            Assert.Same(newerReport, restamped.Analysis);
+            Assert.Equal(requestVersion, restamped.AnalysisRequestVersion);
+        }
+        finally
+        {
+            OrbitAnalyserPanel.ResetSessionStatics();
+            OverlayBuffer.ResetSessionStatics();
+        }
+
+        static OrbitAnalysisReport Report(string bodyId, double start) => new()
+        {
+            BodyId = bodyId,
+            StartTimeSeconds = start,
+            EndTimeSeconds = start + 10,
+            SampleCount = 3,
+            EstimatedRevolutions = 0.1,
+            Elements = new(default, default, default, default, default),
+            Trend = [],
+            Notes = [],
+        };
     }
 
     [Fact]

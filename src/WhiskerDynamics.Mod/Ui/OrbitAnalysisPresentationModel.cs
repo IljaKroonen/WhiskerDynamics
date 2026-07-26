@@ -18,6 +18,7 @@ internal sealed record OrbitDashboardValueRow(
     string Label, string Value, string Evidence);
 
 internal sealed record OrbitDashboardPresentation(
+    string BodyId,
     string Description,
     string RequestedInterval,
     string CoveredInterval,
@@ -49,6 +50,7 @@ internal static class OrbitAnalysisPresentationModel
             : 1;
 
         return new(
+            report.BodyId,
             Classify(report.BodyId, report.Elements.Eccentricity.Mean,
                 report.Elements.Inclination.Mean),
             requested,

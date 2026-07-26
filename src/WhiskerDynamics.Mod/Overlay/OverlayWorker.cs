@@ -6,7 +6,7 @@ namespace WhiskerDynamics.Mod.Overlay;
 /// capture cannot starve it. A throwing job is contained per drain.</summary>
 public sealed class KeyedLatestQueue(Action<string, Exception> onJobError)
 {
-    private sealed record Entry(long Version, Action Job);
+    private sealed record Entry(long Version, Action Job, Action? OnDiscard);
     private readonly object _gate = new();
     private readonly Dictionary<string, Entry> _pending = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _running = new(StringComparer.Ordinal);
@@ -19,28 +19,51 @@ public sealed class KeyedLatestQueue(Action<string, Exception> onJobError)
     public long Enqueue(string key, Action job)
         => Enqueue(key, _ => job);
 
+    public long Enqueue(string key, Action job, Action onDiscard)
+        => Enqueue(key, _ => job, onDiscard);
+
     public long Enqueue(string key, Func<long, Action> jobFactory)
+        => Enqueue(key, jobFactory, onDiscard: null);
+
+    public long Enqueue(string key, Func<long, Action> jobFactory, Action? onDiscard)
     {
         lock (_gate)
-            return EnqueueLocked(key, jobFactory);
+            return EnqueueLocked(key, jobFactory, onDiscard);
     }
 
-    public bool TryEnqueue(string key, Func<bool> canEnqueue, Func<long, Action> jobFactory)
+    public bool TryEnqueue(string key, Func<bool> canEnqueue, Func<long, Action> jobFactory,
+        Action? onDiscard = null)
     {
         lock (_gate)
         {
             if (!canEnqueue()) return false;
-            EnqueueLocked(key, jobFactory);
+            EnqueueLocked(key, jobFactory, onDiscard);
             return true;
         }
     }
 
-    private long EnqueueLocked(string key, Func<long, Action> jobFactory)
+    private long EnqueueLocked(
+        string key, Func<long, Action> jobFactory, Action? onDiscard)
     {
         long version = ++_nextVersion;
-        _pending[key] = new(version, jobFactory(version));
+        var entry = new Entry(version, jobFactory(version), onDiscard);
+        if (_pending.TryGetValue(key, out var replaced))
+            DiscardLocked(key, replaced);
+        _pending[key] = entry;
         if (_queued.Add(key)) _order.Enqueue(key);
         return version;
+    }
+
+    private void DiscardLocked(string key, Entry entry)
+    {
+        try
+        {
+            entry.OnDiscard?.Invoke();
+        }
+        catch (Exception e)
+        {
+            onJobError(key, e);
+        }
     }
 
     public bool IsCurrent(string key, long version)
@@ -71,6 +94,8 @@ public sealed class KeyedLatestQueue(Action<string, Exception> onJobError)
         lock (_gate)
         {
             whileLocked?.Invoke();
+            foreach (var (key, entry) in _pending)
+                DiscardLocked(key, entry);
             _pending.Clear();
             // Invalidate in-flight tickets too. Their delegates continue only until
             // their next cooperative check; generation-aware publication supplies
@@ -89,7 +114,8 @@ public sealed class KeyedLatestQueue(Action<string, Exception> onJobError)
     {
         lock (_gate)
         {
-            _pending.Remove(key);
+            if (_pending.Remove(key, out var pending))
+                DiscardLocked(key, pending);
             _running.Remove(key);
             _queued.Remove(key);
         }
@@ -203,7 +229,7 @@ public static class OverlayWorker
     /// A producer that resumes after rebind/reseed therefore cannot borrow the new
     /// worker generation and evict a valid new-session pending job.</summary>
     internal static bool Enqueue(string key, int generation, Func<bool> admissionStillCurrent,
-        Action<Func<bool>, Func<Action, bool>> job)
+        Action<Func<bool>, Func<Action, bool>> job, Action? onDiscard = null)
     {
         EnsureStarted();
         bool accepted = Queue.TryEnqueue(key,
@@ -211,7 +237,8 @@ public static class OverlayWorker
             ticket => () => job(
                 () => generation != CurrentGeneration || !Queue.IsCurrent(key, ticket),
                 action => generation == CurrentGeneration
-                    && Queue.RunIfCurrent(key, ticket, action)));
+                    && Queue.RunIfCurrent(key, ticket, action)),
+            onDiscard);
         if (!accepted) return false;
         Signal.Set();
         return true;
@@ -223,11 +250,14 @@ public static class OverlayWorker
     /// (background, idles on the signal).</summary>
     internal static void ResetSessionStatics(Action? whileQueueLocked = null)
     {
-        Queue.Clear(() =>
+        // Analysis admission holds its own queue gate while consulting this queue.
+        // Take those gates in the same order during reset to avoid an AB/BA deadlock,
+        // while keeping both clears atomic against new-session analysis admission.
+        OverlayAnalysisWorker.ResetSessionStatics(() => Queue.Clear(() =>
         {
             Interlocked.Increment(ref _generation);
             whileQueueLocked?.Invoke();
-        });
+        }));
     }
 
     /// <summary>Revokes one vessel without moving the process-wide session generation.</summary>

@@ -115,7 +115,8 @@ public static class OrbitAnalysisKernel
         double startTimeSeconds, double endTimeSeconds, double mu,
         double meanRadiusMeters, Vector3d equatorialPole,
         double? angularVelocityRadiansPerSecond = null,
-        Action<double>? progress = null)
+        Action<double>? progress = null,
+        Func<bool>? shouldStop = null)
     {
         if (times.Length != positions.Length || times.Length != velocities.Length
             || times.Length < 3 || !double.IsFinite(mu) || mu <= 0
@@ -141,7 +142,11 @@ public static class OrbitAnalysisKernel
         for (int i = first; i <= last; i++)
         {
             if ((i - first & 255) == 0)
+            {
+                if (shouldStop?.Invoke() == true)
+                    throw new OperationCanceledException();
                 progress?.Invoke((double)(i - first) / Math.Max(1, last - first));
+            }
             double t = times[i];
             if (!double.IsFinite(t) || i > 0 && t <= times[i - 1]) continue;
             Vector3d r = positions[i], v = velocities[i];
@@ -225,59 +230,98 @@ public static class OrbitAnalysisKernel
                 node, periapsis, phase));
             lastKeptDirection = direction;
         }
+        ThrowIfCancellationRequested(shouldStop);
         progress?.Invoke(1);
         if (points.Count < 3) return null;
 
         // Remove the stencil-only brackets from the reporting/fit window while
         // retaining them for the first crossing interpolation.
-        int reportFirst = points.FindIndex(p => p.Time >= startTimeSeconds);
+        int reportFirst = -1;
+        for (int i = 0; i < points.Count; i++)
+        {
+            PollCancellation(shouldStop, i);
+            if (points[i].Time < startTimeSeconds) continue;
+            reportFirst = i;
+            break;
+        }
         if (reportFirst < 0) return null;
-        int reportLast = points.FindLastIndex(p => p.Time <= endTimeSeconds);
+        int reportLast = -1;
+        for (int i = points.Count - 1; i >= reportFirst; i--)
+        {
+            PollCancellation(shouldStop, points.Count - 1 - i);
+            if (points[i].Time > endTimeSeconds) continue;
+            reportLast = i;
+            break;
+        }
         if (reportLast - reportFirst + 1 < 2) return null;
 
-        double[] phases = Unwrap(points.Select(p => p.SiderealPhase).ToArray());
+        var rawPhases = new double[points.Count];
+        for (int i = 0; i < points.Count; i++)
+        {
+            PollCancellation(shouldStop, i);
+            rawPhases[i] = points[i].SiderealPhase;
+        }
+        double[] phases = Unwrap(rawPhases, shouldStop);
         double revolutions = Math.Abs(phases[reportLast] - phases[reportFirst]) / Tau;
-        var siderealEvents = PhaseCrossings(points, phases, reportFirst, reportLast);
-        var nodePasses = NodeCrossings(points, reportFirst, reportLast, pole, reference);
-        var nodeEvents = nodePasses.Select(p => p.Time).ToList();
+        var siderealEvents = PhaseCrossings(
+            points, phases, reportFirst, reportLast, shouldStop);
+        var nodePasses = NodeCrossings(
+            points, reportFirst, reportLast, pole, reference, shouldStop);
+        var nodeEvents = new List<double>(nodePasses.Count);
+        for (int i = 0; i < nodePasses.Count; i++)
+        {
+            PollCancellation(shouldStop, i);
+            nodeEvents.Add(nodePasses[i].Time);
+        }
         var apsisEvents = ZeroCrossings(points, reportFirst, reportLast,
-            p => p.RadialVelocity, ascending: true);
-        siderealEvents.RemoveAll(t => t < startTimeSeconds || t > endTimeSeconds);
-        nodeEvents.RemoveAll(t => t < startTimeSeconds || t > endTimeSeconds);
-        apsisEvents.RemoveAll(t => t < startTimeSeconds || t > endTimeSeconds);
+            p => p.RadialVelocity, ascending: true, shouldStop);
+        RemoveEventsOutside(siderealEvents,
+            startTimeSeconds, endTimeSeconds, shouldStop);
+        RemoveEventsOutside(nodeEvents,
+            startTimeSeconds, endTimeSeconds, shouldStop);
+        RemoveEventsOutside(apsisEvents,
+            startTimeSeconds, endTimeSeconds, shouldStop);
 
-        var valid = points.GetRange(reportFirst, reportLast - reportFirst + 1);
+        var valid = new List<Point>(reportLast - reportFirst + 1);
+        for (int i = reportFirst; i <= reportLast; i++)
+        {
+            PollCancellation(shouldStop, i - reportFirst);
+            valid.Add(points[i]);
+        }
         var notes = new List<string>();
         OrbitElementSummary elements = new(
-            Statistic(valid, p => p.SemiMajorAxis, circular: false),
-            Statistic(valid, p => p.Eccentricity, circular: false),
-            Statistic(valid, p => p.Inclination, circular: false),
-            Statistic(valid, p => p.Node, circular: true),
-            Statistic(valid, p => p.PeriapsisArgument, circular: true));
+            Statistic(valid, p => p.SemiMajorAxis, circular: false, shouldStop),
+            Statistic(valid, p => p.Eccentricity, circular: false, shouldStop),
+            Statistic(valid, p => p.Inclination, circular: false, shouldStop),
+            Statistic(valid, p => p.Node, circular: true, shouldStop),
+            Statistic(valid, p => p.PeriapsisArgument, circular: true, shouldStop));
         OrbitElementStatistic? periapsisAltitude = radiusKnown
-            ? OptionalStatistic(valid, p => p.PeriapsisRadius - meanRadiusMeters)
+            ? OptionalStatistic(valid,
+                p => p.PeriapsisRadius - meanRadiusMeters, shouldStop)
             : null;
         OrbitElementStatistic? apoapsisAltitude = radiusKnown
             ? OptionalStatistic(valid, p => p.ApoapsisRadius is { } radius
-                ? radius - meanRadiusMeters : double.NaN)
+                ? radius - meanRadiusMeters : double.NaN, shouldStop)
             : null;
         if (!radiusKnown)
             notes.Add("altitudes and surface crossing unavailable: mean body radius was not captured");
 
-        OrbitPrecessionEstimate? nodal = AngularRegression(valid, p => p.Node);
-        OrbitPrecessionEstimate? argumentRate = AngularRegression(valid, p => p.PeriapsisArgument);
+        OrbitPrecessionEstimate? nodal = AngularRegression(
+            valid, p => p.Node, shouldStop);
+        OrbitPrecessionEstimate? argumentRate = AngularRegression(
+            valid, p => p.PeriapsisArgument, shouldStop);
         OrbitPrecessionEstimate? longitudeRate = AngularRegression(valid, p =>
             double.IsFinite(p.Node) && double.IsFinite(p.PeriapsisArgument)
-                ? p.Node + p.PeriapsisArgument : double.NaN);
+                ? p.Node + p.PeriapsisArgument : double.NaN, shouldStop);
         if (nodal is null) notes.Add("nodal precession undefined for an equatorial orbit");
         if (argumentRate is null)
             notes.Add("argument-of-periapsis precession undefined for a circular/equatorial orbit");
         if (longitudeRate is null)
             notes.Add("longitude-of-periapsis precession undefined for a circular/equatorial orbit");
-        var sidereal = Periods(siderealEvents);
-        var nodalPeriod = Periods(nodeEvents);
+        var sidereal = Periods(siderealEvents, shouldStop);
+        var nodalPeriod = Periods(nodeEvents, shouldStop);
         var anomalistic = elements.Eccentricity.Mean >= EccentricAngleFloor
-            ? Periods(apsisEvents)
+            ? Periods(apsisEvents, shouldStop)
             : null;
         if (sidereal is null) notes.Add("sidereal period needs at least two completed revolutions");
         if (nodalPeriod is null) notes.Add("nodal period needs at least two ascending-node passages");
@@ -286,7 +330,7 @@ public static class OrbitAnalysisKernel
         GroundTrackRecurrence? recurrence = null;
         if (angularVelocityRadiansPerSecond is { } spin && double.IsFinite(spin)
             && Math.Abs(spin) > 0 && nodeEvents.Count >= 2)
-            recurrence = Recurrence(nodePasses, spin);
+            recurrence = Recurrence(nodePasses, spin, shouldStop);
         else if (angularVelocityRadiansPerSecond is null || !double.IsFinite(angularVelocityRadiansPerSecond.Value))
             notes.Add("ground-track recurrence unavailable: body spin was not captured");
         else if (Math.Abs(angularVelocityRadiansPerSecond.Value) == 0)
@@ -294,6 +338,8 @@ public static class OrbitAnalysisKernel
         else
             notes.Add("ground-track recurrence needs two ascending-node passages");
 
+        var trend = Trend(valid, radiusKnown ? meanRadiusMeters : null, shouldStop);
+        ThrowIfCancellationRequested(shouldStop);
         return new OrbitAnalysisReport
         {
             BodyId = bodyId,
@@ -306,7 +352,7 @@ public static class OrbitAnalysisKernel
             ApoapsisAltitude = apoapsisAltitude,
             LowestSampledAltitudeMeters = lowestSampledAltitude,
             FirstSurfaceCrossingTimeSeconds = firstSurfaceCrossing,
-            Trend = Trend(valid, radiusKnown ? meanRadiusMeters : null),
+            Trend = trend,
             SiderealPeriod = sidereal,
             NodalPeriod = nodalPeriod,
             AnomalisticPeriod = anomalistic,
@@ -319,19 +365,22 @@ public static class OrbitAnalysisKernel
     }
 
     private static OrbitElementStatistic? OptionalStatistic(
-        IReadOnlyList<Point> points, Func<Point, double> selector)
+        IReadOnlyList<Point> points, Func<Point, double> selector,
+        Func<bool>? shouldStop)
     {
-        var statistic = Statistic(points, selector, circular: false);
+        var statistic = Statistic(points, selector, circular: false, shouldStop);
         return double.IsFinite(statistic.Mean) ? statistic : null;
     }
 
     private static IReadOnlyList<OrbitTrendPoint> Trend(
-        IReadOnlyList<Point> points, double? meanRadius)
+        IReadOnlyList<Point> points, double? meanRadius, Func<bool>? shouldStop)
     {
+        ThrowIfCancellationRequested(shouldStop);
         int count = Math.Min(points.Count, MaxTrendPoints);
         var result = new OrbitTrendPoint[count];
         for (int i = 0; i < count; i++)
         {
+            PollCancellation(shouldStop, i);
             int source = count == 1 ? 0
                 : (int)Math.Round((double)i * (points.Count - 1) / (count - 1));
             Point point = points[source];
@@ -346,10 +395,18 @@ public static class OrbitAnalysisKernel
     }
 
     private static OrbitElementStatistic Statistic(
-        IReadOnlyList<Point> points, Func<Point, double> selector, bool circular)
+        IReadOnlyList<Point> points, Func<Point, double> selector, bool circular,
+        Func<bool>? shouldStop)
     {
-        var values = points.Select(selector).ToArray();
-        int currentIndex = Array.FindIndex(values, double.IsFinite);
+        ThrowIfCancellationRequested(shouldStop);
+        var values = new double[points.Count];
+        int currentIndex = -1;
+        for (int i = 0; i < points.Count; i++)
+        {
+            PollCancellation(shouldStop, i);
+            values[i] = selector(points[i]);
+            if (currentIndex < 0 && double.IsFinite(values[i])) currentIndex = i;
+        }
         if (currentIndex < 0) return new(double.NaN, double.NaN, double.NaN, double.NaN);
         double current = values[currentIndex];
         if (circular)
@@ -357,18 +414,28 @@ public static class OrbitAnalysisKernel
             double sx = 0, sy = 0, weight = 0;
             for (int i = 0; i < values.Length; i++)
             {
+                PollCancellation(shouldStop, i);
                 if (!double.IsFinite(values[i])) continue;
                 double w = TimeWeight(points, i);
                 sx += w * Math.Cos(values[i]); sy += w * Math.Sin(values[i]); weight += w;
             }
             double mean = weight > 0 ? Positive(Math.Atan2(sy, sx)) : double.NaN;
-            var unwrapped = UnwrapAround(values, mean);
-            var finite = unwrapped.Where(double.IsFinite).ToArray();
-            return new(current, mean, finite.Min(), finite.Max());
+            var unwrapped = UnwrapAround(values, mean, shouldStop);
+            double circularMin = double.PositiveInfinity;
+            double circularMax = double.NegativeInfinity;
+            for (int i = 0; i < unwrapped.Length; i++)
+            {
+                PollCancellation(shouldStop, i);
+                if (!double.IsFinite(unwrapped[i])) continue;
+                circularMin = Math.Min(circularMin, unwrapped[i]);
+                circularMax = Math.Max(circularMax, unwrapped[i]);
+            }
+            return new(current, mean, circularMin, circularMax);
         }
         double sum = 0, total = 0, min = double.PositiveInfinity, max = double.NegativeInfinity;
         for (int i = 0; i < values.Length; i++)
         {
+            PollCancellation(shouldStop, i);
             double value = values[i];
             if (!double.IsFinite(value)) continue;
             double w = TimeWeight(points, i);
@@ -387,8 +454,10 @@ public static class OrbitAnalysisKernel
     }
 
     private static OrbitPrecessionEstimate? AngularRegression(
-        IReadOnlyList<Point> points, Func<Point, double> selector)
+        IReadOnlyList<Point> points, Func<Point, double> selector,
+        Func<bool>? shouldStop)
     {
+        ThrowIfCancellationRequested(shouldStop);
         // Equatorial/circular arcs intentionally carry NaN for undefined angles.
         // Keep the first two finite observations inline and allocate only when a
         // regression is actually possible. This preserves the original one-pass
@@ -398,8 +467,10 @@ public static class OrbitAnalysisKernel
         int finiteCount = 0;
         List<Point>? finitePoints = null;
         List<double>? values = null;
-        foreach (var point in points)
+        for (int pointIndex = 0; pointIndex < points.Count; pointIndex++)
         {
+            PollCancellation(shouldStop, pointIndex);
+            Point point = points[pointIndex];
             double value = selector(point);
             if (!double.IsFinite(value)) continue;
             if (finiteCount == 0)
@@ -429,11 +500,12 @@ public static class OrbitAnalysisKernel
             finiteCount++;
         }
         if (finitePoints is null) return null;
-        double[] angles = Unwrap([.. values!]);
+        double[] angles = Unwrap(values!, shouldStop);
         double t0 = finitePoints[0].Time;
         double totalWeight = 0, sumT = 0, sumA = 0;
         for (int i = 0; i < finitePoints.Count; i++)
         {
+            PollCancellation(shouldStop, i);
             double weight = TimeWeight(finitePoints, i);
             totalWeight += weight;
             sumT += weight * (finitePoints[i].Time - t0);
@@ -444,6 +516,7 @@ public static class OrbitAnalysisKernel
         double denominator = 0, numerator = 0;
         for (int i = 0; i < finitePoints.Count; i++)
         {
+            PollCancellation(shouldStop, i);
             double weight = TimeWeight(finitePoints, i);
             double dt = finitePoints[i].Time - t0 - meanT;
             denominator += weight * dt * dt;
@@ -454,6 +527,7 @@ public static class OrbitAnalysisKernel
         double residualSq = 0;
         for (int i = 0; i < finitePoints.Count; i++)
         {
+            PollCancellation(shouldStop, i);
             double fit = meanA + slope * (finitePoints[i].Time - t0 - meanT);
             double residual = angles[i] - fit;
             residualSq += TimeWeight(finitePoints, i) * residual * residual;
@@ -461,17 +535,21 @@ public static class OrbitAnalysisKernel
         return new(slope, Math.Sqrt(residualSq / totalWeight), finitePoints.Count);
     }
     private static List<double> PhaseCrossings(
-        IReadOnlyList<Point> points, double[] unwrapped, int first, int last)
+        IReadOnlyList<Point> points, double[] unwrapped, int first, int last,
+        Func<bool>? shouldStop)
     {
+        ThrowIfCancellationRequested(shouldStop);
         var events = new List<double>();
         double direction = unwrapped[last] >= unwrapped[first] ? 1 : -1;
-        double[] phase = direction > 0 ? unwrapped : unwrapped.Select(x => -x).ToArray();
-        double next = Math.Ceiling(phase[first] / Tau) * Tau;
-        if (next <= phase[first] + 1e-12) next += Tau;
-        for (int i = Math.Max(1, first); i <= last && next <= phase[last]; i++)
+        double PhaseAt(int index) => direction * unwrapped[index];
+        double next = Math.Ceiling(PhaseAt(first) / Tau) * Tau;
+        if (next <= PhaseAt(first) + 1e-12) next += Tau;
+        for (int i = Math.Max(1, first); i <= last && next <= PhaseAt(last); i++)
         {
-            if (phase[i] < next || phase[i] == phase[i - 1]) continue;
-            double f = (next - phase[i - 1]) / (phase[i] - phase[i - 1]);
+            PollCancellation(shouldStop, i - Math.Max(1, first));
+            double phase = PhaseAt(i), previousPhase = PhaseAt(i - 1);
+            if (phase < next || phase == previousPhase) continue;
+            double f = (next - previousPhase) / (phase - previousPhase);
             events.Add(points[i - 1].Time + f * (points[i].Time - points[i - 1].Time));
             next += Tau;
         }
@@ -480,11 +558,13 @@ public static class OrbitAnalysisKernel
 
     private static List<double> ZeroCrossings(
         IReadOnlyList<Point> points, int first, int last,
-        Func<Point, double> selector, bool ascending)
+        Func<Point, double> selector, bool ascending, Func<bool>? shouldStop)
     {
+        ThrowIfCancellationRequested(shouldStop);
         var events = new List<double>();
         for (int i = Math.Max(1, first); i <= last; i++)
         {
+            PollCancellation(shouldStop, i - Math.Max(1, first));
             double a = selector(points[i - 1]), b = selector(points[i]);
             bool crossed = ascending ? a <= 0 && b > 0 : a >= 0 && b < 0;
             if (!crossed || !double.IsFinite(a) || !double.IsFinite(b) || a == b) continue;
@@ -494,12 +574,30 @@ public static class OrbitAnalysisKernel
         return events;
     }
 
-    private static List<NodePass> NodeCrossings(IReadOnlyList<Point> points,
-        int first, int last, Vector3d pole, Vector3d reference)
+    private static void RemoveEventsOutside(List<double> events,
+        double startTimeSeconds, double endTimeSeconds, Func<bool>? shouldStop)
     {
+        ThrowIfCancellationRequested(shouldStop);
+        int kept = 0;
+        for (int i = 0; i < events.Count; i++)
+        {
+            PollCancellation(shouldStop, i);
+            double value = events[i];
+            if (value < startTimeSeconds || value > endTimeSeconds) continue;
+            events[kept++] = value;
+        }
+        if (kept < events.Count) events.RemoveRange(kept, events.Count - kept);
+    }
+
+    private static List<NodePass> NodeCrossings(IReadOnlyList<Point> points,
+        int first, int last, Vector3d pole, Vector3d reference,
+        Func<bool>? shouldStop)
+    {
+        ThrowIfCancellationRequested(shouldStop);
         var events = new List<NodePass>();
         for (int i = Math.Max(1, first); i <= last; i++)
         {
+            PollCancellation(shouldStop, i - Math.Max(1, first));
             double a = points[i - 1].R.Dot(pole), b = points[i].R.Dot(pole);
             if (!(a <= 0 && b > 0) || !double.IsFinite(a) || !double.IsFinite(b) || a == b)
                 continue;
@@ -513,25 +611,53 @@ public static class OrbitAnalysisKernel
         }
         return events;
     }
-    private static OrbitPeriodEstimate? Periods(IReadOnlyList<double> events)
+    private static OrbitPeriodEstimate? Periods(
+        IReadOnlyList<double> events, Func<bool>? shouldStop)
     {
+        ThrowIfCancellationRequested(shouldStop);
         if (events.Count < 2) return null;
-        var values = new double[events.Count - 1];
-        for (int i = 0; i < values.Length; i++) values[i] = events[i + 1] - events[i];
-        var valid = values.Where(x => double.IsFinite(x) && x > 0).ToArray();
-        if (valid.Length == 0) return null;
-        double mean = valid.Average();
-        double variance = valid.Sum(x => (x - mean) * (x - mean)) / valid.Length;
-        return new(mean, Math.Sqrt(variance), valid.Min(), valid.Max(), valid.Length);
+        int count = 0;
+        double sum = 0, min = double.PositiveInfinity, max = double.NegativeInfinity;
+        for (int i = 0; i < events.Count - 1; i++)
+        {
+            PollCancellation(shouldStop, i);
+            double value = events[i + 1] - events[i];
+            if (!double.IsFinite(value) || value <= 0) continue;
+            count++;
+            sum += value;
+            min = Math.Min(min, value);
+            max = Math.Max(max, value);
+        }
+        if (count == 0) return null;
+        double mean = sum / count;
+        double varianceSum = 0;
+        for (int i = 0; i < events.Count - 1; i++)
+        {
+            PollCancellation(shouldStop, i);
+            double value = events[i + 1] - events[i];
+            if (!double.IsFinite(value) || value <= 0) continue;
+            varianceSum += (value - mean) * (value - mean);
+        }
+        return new(mean, Math.Sqrt(varianceSum / count), min, max, count);
     }
 
-    private static GroundTrackRecurrence Recurrence(IReadOnlyList<NodePass> nodes, double spin)
+    private static GroundTrackRecurrence Recurrence(
+        IReadOnlyList<NodePass> nodes, double spin, Func<bool>? shouldStop)
     {
-        double[] ground = Unwrap(nodes
-            .Select(node => Positive(node.Longitude - spin * node.Time)).ToArray());
+        ThrowIfCancellationRequested(shouldStop);
+        var wrappedGround = new double[nodes.Count];
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            PollCancellation(shouldStop, i);
+            wrappedGround[i] = Positive(nodes[i].Longitude - spin * nodes[i].Time);
+        }
+        double[] ground = Unwrap(wrappedGround, shouldStop);
         double shift = 0;
         for (int i = 1; i < ground.Length; i++)
+        {
+            PollCancellation(shouldStop, i - 1);
             shift += WrapSigned(ground[i] - ground[i - 1]);
+        }
         shift /= ground.Length - 1;
 
         int bestOrbits = 1, bestCycles = 0, bestWindows = 0;
@@ -540,10 +666,12 @@ public static class OrbitAnalysisKernel
         int limit = Math.Min(MaxRecurrenceOrbits, nodes.Count - 1);
         for (int q = 1; q <= limit; q++)
         {
+            ThrowIfCancellationRequested(shouldStop);
             int windows = nodes.Count - q;
             double errorSq = 0, duration = 0, deltaSum = 0;
             for (int i = 0; i < windows; i++)
             {
+                PollCancellation(shouldStop, i);
                 double delta = ground[i + q] - ground[i];
                 double closure = WrapSigned(delta);
                 errorSq += closure * closure;
@@ -592,13 +720,16 @@ public static class OrbitAnalysisKernel
     private static double PositiveAngle(Vector3d from, Vector3d to, Vector3d normal) =>
         Positive(Math.Atan2(normal.Dot(from.Cross(to)), Math.Clamp(from.Dot(to), -1.0, 1.0)));
 
-    private static double[] Unwrap(double[] values)
+    private static double[] Unwrap(
+        IReadOnlyList<double> values, Func<bool>? shouldStop)
     {
-        if (values.Length == 0) return [];
-        var result = new double[values.Length];
+        ThrowIfCancellationRequested(shouldStop);
+        if (values.Count == 0) return [];
+        var result = new double[values.Count];
         result[0] = values[0];
-        for (int i = 1; i < values.Length; i++)
+        for (int i = 1; i < values.Count; i++)
         {
+            PollCancellation(shouldStop, i);
             if (!double.IsFinite(values[i]) || !double.IsFinite(result[i - 1]))
             {
                 result[i] = values[i];
@@ -609,12 +740,28 @@ public static class OrbitAnalysisKernel
         return result;
     }
 
-    private static double[] UnwrapAround(double[] values, double center)
+    private static double[] UnwrapAround(
+        double[] values, double center, Func<bool>? shouldStop)
     {
+        ThrowIfCancellationRequested(shouldStop);
         var result = new double[values.Length];
         for (int i = 0; i < values.Length; i++)
+        {
+            PollCancellation(shouldStop, i);
             result[i] = double.IsFinite(values[i]) ? center + WrapSigned(values[i] - center) : double.NaN;
+        }
         return result;
+    }
+
+    private static void PollCancellation(Func<bool>? shouldStop, int index)
+    {
+        if ((index & 255) == 0) ThrowIfCancellationRequested(shouldStop);
+    }
+
+    private static void ThrowIfCancellationRequested(Func<bool>? shouldStop)
+    {
+        if (shouldStop?.Invoke() == true)
+            throw new OperationCanceledException();
     }
 
     private static double Positive(double angle)

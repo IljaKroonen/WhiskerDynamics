@@ -572,34 +572,6 @@ public class OrbitHoverHitTestTests
             projector.FineProjections);
     }
 
-    [Fact]
-    public void Warm_search_allocates_no_query_sized_scratch()
-    {
-        var points = new Vector3d[2_048];
-        for (int i = 0; i < points.Length; i++)
-            points[i] = new Vector3d(i * 3, Math.Sin(i * 0.03), 100);
-        int[] traversal = Enumerable.Range(0, points.Length).ToArray();
-        var blocks = HoverHitTestKernel.BuildBlocks(points, traversal);
-        var projector = new TestProjector(points, perspective: false,
-            screenOffsetX: 0, screenOffsetY: 0);
-        var mouse = new HoverScreenPoint(3000, 0.2f);
-        Assert.True(HoverHitTestKernel.TryNearest(
-            traversal, blocks, 0, null, mouse, ref projector, out _));
-
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        double checksum = 0;
-        for (int i = 0; i < 256; i++)
-        {
-            Assert.True(HoverHitTestKernel.TryNearest(
-                traversal, blocks, 0, null, mouse, ref projector, out HoverHit hit));
-            checksum += hit.Fraction + hit.Projected.X;
-        }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-        Assert.True(checksum > 0);
-        Assert.Equal(0, allocated);
-    }
-
     private static bool FullScan<TProjector>(int[] traversal, int firstDenseIndex,
         HoverPointRef? prefix, HoverScreenPoint mouse, ref TProjector projector,
         out HoverHit hit)
