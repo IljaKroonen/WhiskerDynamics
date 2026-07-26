@@ -15,8 +15,8 @@ changed, the mod disables its gameplay patches and leaves the game running stock
 
 ## Capabilities
 
-- N-body celestial and vessel propagation, including Earth J2 and configurable
-  Luna gravity harmonics.
+- N-body celestial and vessel propagation, including per-body JSON spherical-harmonic
+  gravity catalogs for Earth and Luna.
 - Sampled celestial, actual, and planned paths with event markers, orbit
   analysis, and selectable reference frames.
 - Finite-burn plan prediction, maneuver optimization, and automatic rendezvous

@@ -128,6 +128,15 @@ static void WriteBundle(
         throw new DirectoryNotFoundException(
             $"publish output not found at {publishDirectory}");
 
+    string settingsDirectory = Path.Combine(publishDirectory, "body-settings");
+    if (!Directory.Exists(settingsDirectory))
+        throw new DirectoryNotFoundException(
+            $"body settings publish directory not found at {settingsDirectory}");
+    string[] settingsFiles = Directory.GetFiles(
+        settingsDirectory, "*.json", SearchOption.TopDirectoryOnly);
+    if (settingsFiles.Length == 0)
+        throw new FileNotFoundException(
+            $"body settings publish directory contains no JSON files: {settingsDirectory}");
     var files = RequiredPublishFiles()
         .Select(name => new BundleFile(
             Path.Combine(publishDirectory, name), BundleEntryName(name)))
@@ -135,6 +144,9 @@ static void WriteBundle(
         .Append(new BundleFile(licensePath, BundleEntryName("LICENSE")))
         .Append(new BundleFile(
             thirdPartyNoticesPath, BundleEntryName("THIRD-PARTY-NOTICES")))
+        .Concat(settingsFiles.Order(StringComparer.Ordinal)
+            .Select(path => new BundleFile(path, BundleEntryName(
+                $"body-settings/{Path.GetFileName(path)}"))))
         .Concat(Directory.GetFiles(publishDirectory, "WhiskerDynamics*.pdb")
             .Order(StringComparer.Ordinal)
             .Select(path => new BundleFile(

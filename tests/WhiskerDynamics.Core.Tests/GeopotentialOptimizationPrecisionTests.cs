@@ -10,7 +10,7 @@ public class GeopotentialOptimizationPrecisionTests
         const double mu = 4.9028000661637961e12;
         var rotation = new BodyRotation(new Vector3d(0, 0, 1), new Vector3d(1, 0, 0),
             new Vector3d(0, 1, 0), 2.6616995e-6, 0);
-        var field = LunarGravityModel.Create(rotation);
+        var field = TestGravityModels.Lunar(rotation);
         var cases = new[]
         {
             (new Vector3d(1_838_000, 0, 0), 86_400.0,

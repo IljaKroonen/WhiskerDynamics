@@ -139,6 +139,9 @@ public class DeploymentScriptTests
                 RequiredPublishFiles.Append("mod.toml").Order().ToArray(),
                 Directory.GetFiles(destination)
                     .Select(Path.GetFileName).Order().ToArray());
+            Assert.Equal(["Earth.json", "Luna.json"],
+                Directory.GetFiles(Path.Combine(destination, "body-settings"))
+                    .Select(path => Path.GetFileName(path)!).Order().ToArray());
             Assert.False(Directory.Exists(backup));
             Assert.Empty(Directory.GetDirectories(root, ".WhiskerDynamics.*"));
         }
@@ -658,6 +661,10 @@ public class DeploymentScriptTests
         Directory.CreateDirectory(project);
         foreach (string name in RequiredPublishFiles)
             File.WriteAllText(Path.Combine(output, name), $"new {name}");
+        string bodySettings = Path.Combine(output, "body-settings");
+        Directory.CreateDirectory(bodySettings);
+        File.WriteAllText(Path.Combine(bodySettings, "Earth.json"), "earth settings");
+        File.WriteAllText(Path.Combine(bodySettings, "Luna.json"), "luna settings");
         var modToml = Path.Combine(project, "mod.toml");
         File.WriteAllText(modToml, "new manifest");
         return (output, modToml);

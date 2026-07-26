@@ -1,4 +1,5 @@
 using KSA;
+using WhiskerDynamics.Core;
 
 namespace WhiskerDynamics.Mod.Runtime;
 
@@ -38,6 +39,7 @@ public static class ModServices
         internal set => Volatile.Write(ref _status, (int)value);
     }
     public static ModConfig Config { get; internal set; } = new();
+    internal static BodySettingsCatalog BodySettings { get; set; } = BodySettingsCatalog.Empty;
     internal static MapTrajectoryState MapTrajectory { get; } = new();
     public static IReadOnlyList<string> Mismatches { get; internal set; } = [];
     public static RailsService? Rails => Volatile.Read(ref _binding)?.Rails;
@@ -151,7 +153,7 @@ public static class ModServices
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 ModConfig.LogRepairs(Config.NormalizeWorkload(), "system bind");
                 replacement = RailsService.CreateFromGameData(
-                    Config, GameConstants.ReadFromGame());
+                    Config, GameConstants.ReadFromGame(), BodySettings);
                 replacement.SetAuthorityFaultHandler(HandleRailsAuthorityFailure);
                 replacement.CaptureEquatorialPolesOnMainThread();
                 replacement.PrepareAuthorityAt(Universe.GetElapsedSimTime().Seconds());

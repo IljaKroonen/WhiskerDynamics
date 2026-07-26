@@ -102,7 +102,8 @@ static int Deploy(string[] args)
             projectDirectory, "bin", configuration, "net10.0", "publish");
         var preparedDeployment = PrepareDeploymentForFiles(
             outputDirectory, Path.Combine(projectDirectory, "mod.toml"), modDirectory,
-            gameTestDriver ? RequiredGameTestDriverPublishFiles() : RequiredPublishFiles());
+            gameTestDriver ? RequiredGameTestDriverPublishFiles() : RequiredPublishFiles(),
+            includeBodySettings: !gameTestDriver);
         try
         {
             // Ensure the mod is enabled in the game's manifest. If it already has an entry,
@@ -207,7 +208,8 @@ static string[] RequiredGameTestDriverPublishFiles() =>
 ];
 
 static IReadOnlyList<DeploymentFile> PreflightDeploymentForFiles(
-    string outputDirectory, string modTomlPath, IReadOnlyList<string> requiredFiles)
+    string outputDirectory, string modTomlPath, IReadOnlyList<string> requiredFiles,
+    bool includeBodySettings)
 {
     if (!Directory.Exists(outputDirectory))
         throw new DirectoryNotFoundException(
@@ -224,6 +226,23 @@ static IReadOnlyList<DeploymentFile> PreflightDeploymentForFiles(
             "required deployment files are missing: "
             + string.Join(", ", missing.Select(file => file.SourcePath)));
 
+    if (includeBodySettings)
+    {
+        string settingsDirectory = Path.Combine(outputDirectory, "body-settings");
+        if (!Directory.Exists(settingsDirectory))
+            throw new DirectoryNotFoundException(
+                $"body settings publish directory not found: {settingsDirectory}");
+        string[] settingsFiles = Directory.GetFiles(
+            settingsDirectory, "*.json", SearchOption.TopDirectoryOnly);
+        if (settingsFiles.Length == 0)
+            throw new FileNotFoundException(
+                $"body settings publish directory contains no JSON files: {settingsDirectory}");
+        files.AddRange(settingsFiles
+            .Order(StringComparer.Ordinal)
+            .Select(path => new DeploymentFile(path,
+                Path.Combine("body-settings", Path.GetFileName(path)))));
+    }
+
     files.AddRange(Directory.GetFiles(outputDirectory, "*.pdb")
         .Select(path => new DeploymentFile(path, Path.GetFileName(path))));
     return files;
@@ -232,14 +251,15 @@ static IReadOnlyList<DeploymentFile> PreflightDeploymentForFiles(
 static PreparedDeployment PrepareDeployment(
     string outputDirectory, string modTomlPath, string destinationDirectory)
     => PrepareDeploymentForFiles(
-        outputDirectory, modTomlPath, destinationDirectory, RequiredPublishFiles());
+        outputDirectory, modTomlPath, destinationDirectory, RequiredPublishFiles(),
+        includeBodySettings: true);
 
 static PreparedDeployment PrepareDeploymentForFiles(
     string outputDirectory, string modTomlPath, string destinationDirectory,
-    IReadOnlyList<string> requiredFiles)
+    IReadOnlyList<string> requiredFiles, bool includeBodySettings)
 {
     var files = PreflightDeploymentForFiles(
-        outputDirectory, modTomlPath, requiredFiles);
+        outputDirectory, modTomlPath, requiredFiles, includeBodySettings);
     var parentDirectory = Directory.GetParent(destinationDirectory)?.FullName
         ?? throw new InvalidOperationException(
             $"deployment directory has no parent: {destinationDirectory}");
@@ -256,8 +276,13 @@ static PreparedDeployment PrepareDeploymentForFiles(
     {
         Directory.CreateDirectory(stagingDirectory);
         foreach (var file in files)
-            File.Copy(file.SourcePath,
-                Path.Combine(stagingDirectory, file.DestinationName));
+        {
+            string destinationPath = Path.Combine(stagingDirectory, file.DestinationName);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)
+                ?? throw new InvalidOperationException(
+                    "deployment file has no destination directory"));
+            File.Copy(file.SourcePath, destinationPath);
+        }
         return new PreparedDeployment(
             stagingDirectory, destinationDirectory, backupDirectory, retiredDirectory);
     }

@@ -106,11 +106,11 @@ public class LunarGravityFidelityBenchmarks
     {
         var rotation = new BodyRotation(new Vector3d(0, 0, 1), new Vector3d(1, 0, 0),
             new Vector3d(0, 1, 0), 2.6616995e-6, 0);
-        _degree50 = LunarGravityModel.Create(rotation, LunarGravityFidelity.Degree50);
-        _degree40 = LunarGravityModel.Create(rotation, LunarGravityFidelity.Degree40);
-        _degree30 = LunarGravityModel.Create(rotation, LunarGravityFidelity.Degree30);
-        _degree20 = LunarGravityModel.Create(rotation, LunarGravityFidelity.Degree20);
-        _degree10 = LunarGravityModel.Create(rotation, LunarGravityFidelity.Degree10);
+        _degree50 = BenchmarkGravityModels.Lunar(rotation, 50);
+        _degree40 = BenchmarkGravityModels.Lunar(rotation, 40);
+        _degree30 = BenchmarkGravityModels.Lunar(rotation, 30);
+        _degree20 = BenchmarkGravityModels.Lunar(rotation, 20);
+        _degree10 = BenchmarkGravityModels.Lunar(rotation, 10);
         _cases = Enumerable.Range(0, Batch).Select(i =>
         {
             double longitude = i * 2 * Math.PI / Batch;
@@ -168,11 +168,11 @@ public class LunarGravityPropagationBenchmarks
     {
         var rotation = new BodyRotation(new Vector3d(0, 0, 1), new Vector3d(1, 0, 0),
             new Vector3d(0, 1, 0), 2.6616995e-6, 0);
-        _degree50 = LunarGravityModel.Create(rotation, LunarGravityFidelity.Degree50);
-        _degree40 = LunarGravityModel.Create(rotation, LunarGravityFidelity.Degree40);
-        _degree30 = LunarGravityModel.Create(rotation, LunarGravityFidelity.Degree30);
-        _degree20 = LunarGravityModel.Create(rotation, LunarGravityFidelity.Degree20);
-        _degree10 = LunarGravityModel.Create(rotation, LunarGravityFidelity.Degree10);
+        _degree50 = BenchmarkGravityModels.Lunar(rotation, 50);
+        _degree40 = BenchmarkGravityModels.Lunar(rotation, 40);
+        _degree30 = BenchmarkGravityModels.Lunar(rotation, 30);
+        _degree20 = BenchmarkGravityModels.Lunar(rotation, 20);
+        _degree10 = BenchmarkGravityModels.Lunar(rotation, 10);
         _initialStates =
         [
             CircularState(100_000, 0, 0),

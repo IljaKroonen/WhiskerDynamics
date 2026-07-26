@@ -203,24 +203,3 @@ public sealed class Geopotential
             $"Geopotential rotation must be a right-handed orthonormal basis (error {e:E2}).", nameof(r));
     }
 }
-
-public static class KnownGeopotentials
-{
-    public static Geopotential? ForBody(string id, BodyRotation? rotation) =>
-        ForBody(id, rotation, LunarGravityFidelity.Degree50);
-
-    public static Geopotential? ForBody(string id, BodyRotation? rotation,
-        LunarGravityFidelity lunarGravityFidelity)
-    {
-        if (rotation is not { } r) return null;
-        return id switch
-        {
-            "Earth" => Geopotential.FromJ2(6_378_137, r, 1.08262668e-3),
-            // GRGM1200A is a principal-axis model; KSA's captured CCF is treated as
-            // that body-fixed frame. A catalog-specific prime-meridian offset would
-            // need to be applied here if the game introduces one.
-            "Luna" => LunarGravityModel.Create(r, lunarGravityFidelity),
-            _ => null,
-        };
-    }
-}

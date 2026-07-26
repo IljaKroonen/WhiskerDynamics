@@ -44,7 +44,7 @@ public class GravityBenchmarks
         _railsSnapshot = backbone.Select(b => _ephemerides.GetState(b, T)).ToArray();
         _pairwise = new PairwiseAccelerationKernel(backbone.Select(b => b.Mu).ToArray());
         _accBuffer = new Vector3d[backbone.Length];
-        _lunarGravity = LunarGravityModel.Create(new BodyRotation(
+        _lunarGravity = BenchmarkGravityModels.Lunar(new BodyRotation(
             new Vector3d(0, 0, 1), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0),
             2.6616995e-6, 0));
         _lowLunarOrbit = new Vector3d(1_838_000, 0, 0);
