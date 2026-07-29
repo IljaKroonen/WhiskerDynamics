@@ -1161,6 +1161,7 @@ public class CurvePriorityTests
 /// <summary>Honest orbit lines: the overlay buffer holds one immutable batch PER vessel,
 /// keyed by vessel id, with publish/read/reset semantics per slot;
 /// single-reference publication per slot keeps reads tear-free.</summary>
+[Collection("orbit-analyser-statics")]
 public class OverlayBufferTests
 {
     private static OverlaySamples Batch(string vesselId) => new()

@@ -326,6 +326,7 @@ public class OrbitAnalysisKernelTests
 
     private static double Degrees(double value) => value * Math.PI / 180.0;
 }
+[Collection("orbit-analyser-statics")]
 public class OrbitAnalyserRequestTests
 {
     [Fact]
