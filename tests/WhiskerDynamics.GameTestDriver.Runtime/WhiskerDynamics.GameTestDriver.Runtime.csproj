@@ -9,17 +9,10 @@
     <ProjectReference Include="..\..\src\WhiskerDynamics.Mod\WhiskerDynamics.Mod.csproj">
       <Private>false</Private>
     </ProjectReference>
-    <InternalsVisibleTo Include="WhiskerDynamics.GameTestHost.Tests" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="KSA"><HintPath>$(KsaInstallDir)\KSA.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="BepuUtilities"><HintPath>$(KsaInstallDir)\BepuUtilities.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="Brutal.Glfw"><HintPath>$(KsaInstallDir)\Brutal.Glfw.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="Brutal.Core.Common"><HintPath>$(KsaInstallDir)\Brutal.Core.Common.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="Brutal.Concurrency"><HintPath>$(KsaInstallDir)\Brutal.Concurrency.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Brutal.Core.Numerics"><HintPath>$(KsaInstallDir)\Brutal.Core.Numerics.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="Brutal.Core.Strings"><HintPath>$(KsaInstallDir)\Brutal.Core.Strings.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="CommunityToolkit.HighPerformance"><HintPath>$(KsaInstallDir)\CommunityToolkit.HighPerformance.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
   <Target Name="VerifyKsaReferenceBuild" BeforeTargets="CoreCompile">
     <GetAssemblyIdentity AssemblyFiles="$(KsaInstallDir)\KSA.dll">

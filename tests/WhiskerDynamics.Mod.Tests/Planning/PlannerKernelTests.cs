@@ -25,6 +25,16 @@ public class PlannerKernelTests
         Assert.Equal(9.0, o);
     }
 
+    [Theory]
+    [InlineData(11_999, 10_000, false)]
+    [InlineData(12_000, 10_000, true)]
+    [InlineData(12_001, 10_000, true)]
+    [InlineData(9_999, 10_000, false)]
+    public void Live_delta_v_must_stay_quiet_for_the_full_rebase_grace(
+        long nowMs, long lastWitnessMs, bool expected) =>
+        Assert.Equal(expected,
+            PlannerKernel.LiveDeltaVHasSettled(nowMs, lastWitnessMs));
+
     [Fact]
     public void ValidateAdd_accepts_a_clean_future_burn()
     {

@@ -11,7 +11,6 @@ public static class GameTestDriverMain
         HarmonyPatchActivation.ApplyAndWarm(harmony,
         [
             typeof(GameTestScenarioPatch),
-            typeof(GameTestRcsBurnCutoffPatch),
         ]);
         ModLog.Info("game test driver loaded");
     }
