@@ -474,7 +474,8 @@ internal static class GameplayTargets
         // Forward-RCS finite-plan estimate. The committed state list supplies KSA's
         // own forward-map and propellant-availability decisions; core/nozzle vacuum
         // performance is reduced to net +body-X thrust and total selected flow.
-        new("Vehicle.Parts", typeof(Vehicle), "Parts", MemberKind.Field, null, typeof(PartTree), IsStatic: false),
+        new("Vehicle.Parts", typeof(Vehicle), "Parts", MemberKind.Property, null,
+            typeof(PartTree), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("PartTree.States", typeof(PartTree), "States", MemberKind.Field, null, typeof(ModuleStateList), IsStatic: false),
         new("VehicleConfigInfo.Thrusters", typeof(FlightComputer.VehicleConfigInfo),
             "Thrusters", MemberKind.Field, null, typeof(List<ThrusterController>), IsStatic: false),

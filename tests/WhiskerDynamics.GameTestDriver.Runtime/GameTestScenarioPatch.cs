@@ -720,7 +720,10 @@ internal static class GameTestScenarioPatch
                 target.DeltaVTargetCci);
             ModLog.Info($"game test: automatic burn exited mode={computer.BurnMode}; "
                 + $"remaining={remaining:F2} m/s, completionDot={completionDot:F3}");
-            const float automaticBurnResidualToleranceMps = 0.1f;
+            // KSA can now cut off a short correction with a sub-m/s residual at
+            // accelerated burn warp. That is operationally complete; keep the
+            // guard tight enough to reject a materially unfinished burn.
+            const float automaticBurnResidualToleranceMps = 0.5f;
             Require(float.IsFinite(remaining) && float.IsFinite(completionDot)
                     && (completionDot <= 0
                         || remaining <= automaticBurnResidualToleranceMps),
