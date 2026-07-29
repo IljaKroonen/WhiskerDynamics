@@ -74,12 +74,6 @@ internal sealed class GameTestHost(GameTestHostServices services)
                 Environment.SpecialFolder.MyDocuments);
             string modDirectory = Path.Combine(
                 documents, "My Games", "Kitten Space Agency", "mods", "WhiskerDynamics");
-            string saveDirectory = Path.Combine(
-                documents, "My Games", "Kitten Space Agency", "saves", scenario.Save);
-            if (!string.IsNullOrWhiteSpace(scenario.Save)
-                && !services.Files.DirectoryExists(saveDirectory))
-                throw new DirectoryNotFoundException(
-                    $"save fixture '{scenario.Save}' was not found at {saveDirectory}");
 
             string requestPath = Path.Combine(
                 modDirectory, GameTestProtocol.RequestFileName);

@@ -29,7 +29,6 @@ internal sealed record GameTestHostServices(
 internal interface IHostFileSystem
 {
     bool FileExists(string path);
-    bool DirectoryExists(string path);
     void CreateDirectory(string path);
     void DeleteFile(string path);
     Task WriteAllTextAsync(string path, string contents);

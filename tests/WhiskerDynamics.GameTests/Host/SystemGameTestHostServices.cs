@@ -15,7 +15,6 @@ internal sealed class CurrentConsoleTextWriter(bool error) : TextWriter
 internal sealed class SystemHostFileSystem : IHostFileSystem
 {
     public bool FileExists(string path) => File.Exists(path);
-    public bool DirectoryExists(string path) => Directory.Exists(path);
     public void CreateDirectory(string path) => Directory.CreateDirectory(path);
     public void DeleteFile(string path) => File.Delete(path);
     public Task WriteAllTextAsync(string path, string contents) =>

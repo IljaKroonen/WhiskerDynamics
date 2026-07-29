@@ -1,6 +1,7 @@
 using System.Text.Json;
 using WhiskerDynamics.GameTesting;
 using WhiskerDynamics.GameTests.Host;
+using WhiskerDynamics.GameTests.Scenarios;
 using HostRunner = WhiskerDynamics.GameTests.Host.GameTestHost;
 
 namespace WhiskerDynamics.GameTestHost.Tests;
@@ -13,11 +14,52 @@ public class GameTestHostTests
         IReadOnlyDictionary<string, IGameTestScenario> scenarios =
             ScenarioCatalog.Discover();
 
+        Assert.Equal(["moon-transfer"], scenarios.Keys);
+        Assert.True(scenarios.ContainsKey("MOON-TRANSFER"));
+        Assert.Equal("moon-transfer", scenarios["MOON-TRANSFER"].Id);
+    }
+
+    [Fact]
+    public void Moon_transfer_reproduces_auto_warp_circularization_from_earth_soi()
+    {
+        GameTestScenario scenario = new MoonTransferScenario().Create();
+        string[] actions = scenario.Steps.Select(step => step.Action).ToArray();
+
         Assert.Equal(
-            ["create-fixtures", "moon-transfer", "nrho-station-keeping", "rendezvous", "smoke"],
-            scenarios.Keys.Order());
-        Assert.True(scenarios.ContainsKey("SMOKE"));
-        Assert.Equal("smoke", scenarios["SMOKE"].Id);
+        [
+            "wait-ready",
+            "assert-parent",
+            "plan-and-execute-lunar-transfer",
+            "assert-perilune-altitude-between",
+            "plan-lunar-circularization-from-earth-soi",
+            "execute-burns",
+            "assert-bad-lunar-circularization",
+        ], actions);
+
+        GameTestStep transfer = scenario.Steps.Single(
+            step => step.Action == "plan-and-execute-lunar-transfer");
+        Assert.Equal(1, transfer.OrbitOffset);
+        Assert.Equal(3_150, transfer.DeltaVMetersPerSecond);
+        Assert.Equal(3_600, transfer.CorrectionTimescaleSeconds);
+        Assert.Equal(500_000, transfer.TargetRadiusMeters);
+
+        GameTestStep assertion = scenario.Steps.Single(
+            step => step.Action == "assert-perilune-altitude-between");
+        Assert.Equal(200_000, assertion.MinPeriluneAltitudeMeters);
+        Assert.Equal(800_000, assertion.MaxPeriluneAltitudeMeters);
+
+        GameTestStep circularization = scenario.Steps.Single(
+            step => step.Action == "plan-lunar-circularization-from-earth-soi");
+        Assert.Equal("Rocket", circularization.Vessel);
+        Assert.Null(circularization.TargetRadiusMeters);
+
+        GameTestStep execute = scenario.Steps.Single(
+            step => step.Action == "execute-burns");
+        Assert.Equal("Rocket", execute.Vessel);
+
+        GameTestStep badOrbit = scenario.Steps.Single(
+            step => step.Action == "assert-bad-lunar-circularization");
+        Assert.Equal(0.02, badOrbit.MinEccentricity);
     }
 
     [Fact]
@@ -51,7 +93,7 @@ public class GameTestHostTests
         harness.Processes.Enumerations.Enqueue([]);
         harness.Clock.OnDelay = () => harness.WriteResult(passed: true);
 
-        int exitCode = await harness.Host.RunAsync(["smoke"]);
+        int exitCode = await harness.Host.RunAsync(["moon-transfer"]);
 
         Assert.Equal(0, exitCode);
         Assert.Collection(harness.Commands.Runs,
@@ -123,7 +165,7 @@ public class GameTestHostTests
             harness.Result("run-1", passed: true), GameTestProtocol.JsonOptions));
         harness.Clock.OnDelay = () => harness.Files.SetFile(harness.ResultPath, "available");
 
-        int exitCode = await harness.Host.RunAsync(["smoke"]);
+        int exitCode = await harness.Host.RunAsync(["moon-transfer"]);
 
         Assert.Equal(0, exitCode);
         Assert.Equal(3, harness.Clock.DelayCalls);
@@ -136,7 +178,7 @@ public class GameTestHostTests
         var harness = new Harness();
         harness.Processes.Enumerations.Enqueue([]);
 
-        int exitCode = await harness.Host.RunAsync(["smoke", "--timeout", "0.5"]);
+        int exitCode = await harness.Host.RunAsync(["moon-transfer", "--timeout", "0.5"]);
 
         Assert.Equal(2, exitCode);
         Assert.Equal(2, harness.Clock.DelayCalls);
@@ -153,7 +195,7 @@ public class GameTestHostTests
         harness.Processes.Enumerations.Enqueue([]);
         harness.Processes.LaunchFailure = new InvalidOperationException("launcher failed");
 
-        int exitCode = await harness.Host.RunAsync(["smoke"]);
+        int exitCode = await harness.Host.RunAsync(["moon-transfer"]);
 
         Assert.Equal(2, exitCode);
         Assert.False(harness.Files.Files.ContainsKey(harness.RequestPath));
@@ -170,7 +212,7 @@ public class GameTestHostTests
         harness.Processes.Enumerations.Enqueue([]);
         harness.Clock.DelayFailure = new IOException("poll failed");
 
-        int exitCode = await harness.Host.RunAsync(["smoke"]);
+        int exitCode = await harness.Host.RunAsync(["moon-transfer"]);
 
         Assert.Equal(2, exitCode);
         AssertLaunchedSessionCleaned(harness);
@@ -185,7 +227,7 @@ public class GameTestHostTests
         harness.Files.ReadFailure = new IOException("read failed");
         harness.Clock.OnDelay = () => harness.Files.SetFile(harness.ResultPath, "available");
 
-        int exitCode = await harness.Host.RunAsync(["smoke"]);
+        int exitCode = await harness.Host.RunAsync(["moon-transfer"]);
 
         Assert.Equal(2, exitCode);
         AssertLaunchedSessionCleaned(harness);
@@ -204,7 +246,7 @@ public class GameTestHostTests
             harness.WriteResult(passed: true);
         };
 
-        int exitCode = await harness.Host.RunAsync(["smoke"]);
+        int exitCode = await harness.Host.RunAsync(["moon-transfer"]);
 
         Assert.Equal(0, exitCode);
         AssertLaunchedSessionCleaned(harness);
@@ -222,7 +264,7 @@ public class GameTestHostTests
         harness.Clock.OnDelay = () => harness.WriteResult(passed: true);
 
         int exitCode = await harness.Host.RunAsync(
-            ["smoke", "--no-deploy", "--keep-game-running"]);
+            ["moon-transfer", "--no-deploy", "--keep-game-running"]);
 
         Assert.Equal(0, exitCode);
         Assert.Empty(harness.Commands.Runs);
@@ -237,7 +279,7 @@ public class GameTestHostTests
         var harness = new Harness();
         harness.Processes.Enumerations.Enqueue([new FakeProcess("KSA")]);
 
-        int exitCode = await harness.Host.RunAsync(["smoke"]);
+        int exitCode = await harness.Host.RunAsync(["moon-transfer"]);
 
         Assert.Equal(2, exitCode);
         Assert.Empty(harness.Commands.Runs);
@@ -260,7 +302,7 @@ public class GameTestHostTests
         Assert.Equal(0, unknown.Processes.EnumerateCalls);
 
         var invalidTimeout = new Harness();
-        Assert.Equal(2, await invalidTimeout.Host.RunAsync(["smoke", "--timeout", "NaN"]));
+        Assert.Equal(2, await invalidTimeout.Host.RunAsync(["moon-transfer", "--timeout", "NaN"]));
         Assert.Equal(
             "game test host failed: --timeout must be finite and positive"
             + Environment.NewLine,
@@ -275,7 +317,7 @@ public class GameTestHostTests
         harness.Processes.Enumerations.Enqueue([]);
         harness.Clock.OnDelay = () => harness.WriteResult(passed: false);
 
-        int exitCode = await harness.Host.RunAsync(["smoke"]);
+        int exitCode = await harness.Host.RunAsync(["moon-transfer"]);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("FAIL: scenario (1.5 s)", harness.Output.ToString());
@@ -345,7 +387,7 @@ public class GameTestHostTests
                 Error,
                 () => scenarios ?? new Dictionary<string, IGameTestScenario>
                 {
-                    ["smoke"] = new ScenarioDefinition("smoke"),
+                    ["moon-transfer"] = new ScenarioDefinition("moon-transfer"),
                 },
                 () => "run-1");
             Host = new HostRunner(services);
@@ -400,7 +442,6 @@ public class GameTestHostTests
         internal int ReadCalls;
 
         public bool FileExists(string path) => Files.ContainsKey(path);
-        public bool DirectoryExists(string path) => Directories.Contains(path);
         public void CreateDirectory(string path)
         {
             Directories.Add(path);

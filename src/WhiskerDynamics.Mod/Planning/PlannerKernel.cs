@@ -25,6 +25,10 @@ public static class PlannerKernel
     /// actively changing.</summary>
     public const long RebaseCoastGraceMs = 2000;
 
+    public static bool LiveDeltaVHasSettled(long nowMs, long lastWitnessMs) =>
+        nowMs >= lastWitnessMs
+        && nowMs - lastWitnessMs >= RebaseCoastGraceMs;
+
     public enum Verdict { Ok, NotFinite, NotAhead, DuplicateTime, NoPatch }
 
     public static double3 ComposeVlf(double prograde, double normal, double outward) =>

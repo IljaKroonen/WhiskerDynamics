@@ -336,6 +336,86 @@ public static class BurnPlannerPanel
         return null;
     }
 
+    internal static string PlanBurnForGameTest(VesselRegistry vessels,
+        Vehicle vehicle, double burnTime, FrameSpec? frame, Vector3d components)
+    {
+        double now = Universe.GetElapsedSimTime().Seconds();
+        IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vehicle);
+        FlightPlanModel? plan = FlightPlans.TryGet(vehicle.Id);
+        bool created = false;
+        if (plan is null)
+        {
+            var times = new List<double>(burns.Count + 1);
+            foreach (Burn burn in burns) times.Add(burn.Time.Seconds());
+            times.Add(burnTime);
+            plan = FlightPlans.Create(vehicle.Id, now,
+                FlightPlans.InitialLengthSeconds(now, times));
+            created = true;
+            ModLog.Info($"planner: flight plan created for '{vehicle.Id}' at "
+                + $"t={now:F1} s by compiled player workflow");
+        }
+        else if (plan.Diverged)
+        {
+            return "rejected: plan diverged; rebase it before adding a burn";
+        }
+
+        string verdict = QueueBurn(vessels, vehicle,
+            vessels.TryGetTracked(vehicle.Id), vehicle.Orbit, plan, burns, now,
+            burnTime, frame, components, allowVlfFallback: false);
+        if (!verdict.StartsWith("queued", StringComparison.Ordinal) && created)
+            FlightPlans.Remove(vehicle.Id);
+        _status = verdict;
+        InvalidateAnalysis();
+        return verdict;
+    }
+
+    internal static string RebasePlanForGameTest(
+        VesselRegistry vessels, Vehicle vehicle)
+    {
+        if (FlightPlans.TryGet(vehicle.Id) is not { } plan)
+            return "rejected: no flight plan";
+        if (vessels.TryGetTracked(vehicle.Id) is not { } tracked)
+            return "rejected: vessel is not tracked";
+        if (!PlannerKernel.LiveDeltaVHasSettled(
+                Environment.TickCount64, tracked.LastDvWitnessMs))
+            return "rejected: rebase is unavailable until thrust stops";
+
+        Rebase(vessels, vehicle, tracked, vehicle.Orbit, plan,
+            BurnPlanWriter.Snapshot(vehicle),
+            Universe.GetElapsedSimTime().Seconds());
+        return _status;
+    }
+
+    internal static string RemoveCompletedBurnForGameTest(
+        VesselRegistry vessels, Vehicle vehicle)
+    {
+        if (FlightPlans.TryGet(vehicle.Id) is not { } plan)
+            return "rejected: no flight plan";
+        if (vessels.TryGetTracked(vehicle.Id) is not { } tracked)
+            return "rejected: vessel is not tracked";
+        if (!PlannerKernel.LiveDeltaVHasSettled(
+                Environment.TickCount64, tracked.LastDvWitnessMs))
+            return "waiting: live delta-v has not settled";
+
+        IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vehicle);
+        if (burns.Count == 0)
+            return "rejected: the flight plan has no stock execution node";
+        Burn burn = burns[0];
+        double now = Universe.GetElapsedSimTime().Seconds();
+        if (burn.Time.Seconds() > now)
+            return "waiting: the first burn epoch is still in the future";
+
+        double time = burn.Time.Seconds();
+        string verdict = BurnPlanWriter.TryRemove(vehicle, burn);
+        if (verdict == "queued")
+        {
+            plan.RemoveMetaAt(time);
+            if (PickerTargets(vehicle.Id, time)) ClosePicker();
+        }
+        InvalidateAnalysis();
+        return verdict;
+    }
+
     /// <summary>Save bridge for the few frames between the two queued stock writes.
     /// The plan itself does not exist yet; this ownership marker lets load remove
     /// whichever automatic nodes the stock save captured.</summary>
@@ -560,33 +640,6 @@ public static class BurnPlannerPanel
         ModLog.Info($"planner: rendezvous solve started for '{vehicle.Id}' -> '{targetId}' "
             + $"under '{chaserParent.Id}', window [{now:F0}, {horizon:F0}] s");
     }
-
-    /// <summary>Starts the same rendezvous workflow as the planner button, with an
-    /// explicit duration for a compiled game-test scenario. The background solve and
-    /// both stock-node acceptance stages continue through <see cref="Draw"/>.</summary>
-    internal static string StartRendezvousForGameTest(VesselRegistry vessels,
-        Vehicle vehicle, double planLengthSeconds)
-    {
-        if (_rendezvous is not null)
-            return "rendezvous rejected: another automatic rendezvous is already active";
-
-        double previousLength = _newPlanLengthSeconds;
-        try
-        {
-            _newPlanLengthSeconds = planLengthSeconds;
-            StartRendezvous(vessels, vehicle, BurnPlanWriter.Snapshot(vehicle),
-                Universe.GetElapsedSimTime().Seconds());
-        }
-        finally { _newPlanLengthSeconds = previousLength; }
-
-        return _rendezvous is not null ? "queued" : _status;
-    }
-
-    internal static bool RendezvousPendingForGameTest(string vesselId) =>
-        _rendezvous is { } context
-        && string.Equals(context.VesselId, vesselId, StringComparison.Ordinal);
-
-    internal static string RendezvousStatusForGameTest => _status;
 
     /// <summary>Main-thread transaction: validate the result, create the plan, queue
     /// burn one, then wait for stock to build its post-burn timeline before creating
@@ -1000,7 +1053,8 @@ public static class BurnPlannerPanel
             }
         }
         bool canRebase = tracked is not null
-            && Environment.TickCount64 - tracked.LastDvWitnessMs >= PlannerKernel.RebaseCoastGraceMs;
+            && PlannerKernel.LiveDeltaVHasSettled(
+                Environment.TickCount64, tracked.LastDvWitnessMs);
         if (canRebase)
         {
             if (ImGui.Button("Rebase onto current trajectory"u8, (float2?)null))
@@ -2065,53 +2119,53 @@ public static class BurnPlannerPanel
         if (_status == "applied") meta.Authored = components;
     }
 
-    /// <summary>Add-burn: a zero-dv burn <see cref="AddLeadSeconds"/> ahead, authored
-    /// in the CURRENT map display frame (the frame you are looking at is the frame you
-    /// mean). A zero delta-v is the zero vector in EVERY frame, so the meta simply
-    /// records the frame with zero authored components — but only when that frame can
-    /// actually AUTHOR here (vessel on rails, convertible at the burn time: the same
-    /// gates SwitchFrame applies), because a meta the edit affordances cannot serve
-    /// would be a burn born un-editable in its own frame. Otherwise the burn is
-    /// honestly born VLF and the status says why.</summary>
-    private static void AddBurn(VesselRegistry vessels,
+    private static string QueueBurn(VesselRegistry vessels,
         Vehicle vehicle, TrackedVessel? tracked, Orbit orbit,
-        FlightPlanModel plan, IReadOnlyList<Burn> burns, double now)
+        FlightPlanModel plan, IReadOnlyList<Burn> burns, double now,
+        double burnTime, FrameSpec? frame, Vector3d components,
+        bool allowVlfFallback)
     {
-        double burnTime = now + AddLeadSeconds;
         if (plan.RejectOutsideWindow(burnTime, now, AvailableRailsDays(tracked, now)) is { } outside)
+            return outside;
+        double3 dvVlf = PlannerKernel.ComposeVlf(
+            components.X, components.Y, components.Z);
+        string? frameRefusal = null;
+        if (frame is not null)
         {
-            _status = outside;
-            return;
-        }
-        var frame = FrameManager.Active;
-        string? frameRefusal = frame is null
-            ? null
-            : tracked is null
+            frameRefusal = tracked is null
                 ? "vessel not on rails"
                 : PlannedBurnConverter.TryAuthorDvVlf(
                     vessels, vehicle, orbit, burns,
-                    burnTime, frame, Vector3d.Zero, now, out _);
-        string verdict = BurnPlanWriter.TryAdd(vehicle, burnTime, PlannerKernel.ComposeVlf(0, 0, 0));
-        if (verdict != "queued")
-        {
-            _status = verdict;
-            return;
+                    burnTime, frame, components, now, out dvVlf);
         }
+        if (frameRefusal is not null && !allowVlfFallback)
+            return $"rejected: {frame!.Label} unavailable: {frameRefusal}";
+        string verdict = BurnPlanWriter.TryAdd(vehicle, burnTime, dvVlf);
+        if (verdict != "queued")
+            return verdict;
         if (frame is null || frameRefusal is not null)
         {
-            _status = frame is null
+            return frame is null
                 ? "queued (authored in VLF)"
                 : $"queued (authored in VLF - {frame.Label} unavailable: {frameRefusal})";
-            return;
         }
         plan.SetMeta(new FlightPlanBurnMeta
         {
             TimeSeconds = burnTime,
             Frame = frame,
-            Authored = Vector3d.Zero,
+            Authored = components,
             StampMs = Environment.TickCount64, // grace: the burn lands next frame
         });
-        _status = $"queued (authored in {frame.Label})";
+        return $"queued (authored in {frame.Label})";
+    }
+
+    private static void AddBurn(VesselRegistry vessels,
+        Vehicle vehicle, TrackedVessel? tracked, Orbit orbit,
+        FlightPlanModel plan, IReadOnlyList<Burn> burns, double now)
+    {
+        _status = QueueBurn(vessels, vehicle, tracked, orbit, plan, burns, now,
+            now + AddLeadSeconds, FrameManager.Active, Vector3d.Zero,
+            allowVlfFallback: true);
     }
 
     /// <summary>Component row labels: stock's editor words for VLF (Burn.cs:718/732/746);
