@@ -1208,7 +1208,10 @@ public static class TrajectoryOverlay
                 ? burn.ResolvedParentId : null;
             stockBurns.Add(new PlanSnapshotBurn(burn.TimeSeconds,
                 burn.DeltaVVlf,
-                snapshotParentId ?? usableResolvedParentId ?? fallbackParentId));
+                snapshotParentId ?? usableResolvedParentId ?? fallbackParentId,
+                // Carry an unchanged burn's display vector through a wholesale
+                // recapture; the dv-match guard drops it when the components moved.
+                plan?.SnapshotDisplayDvFor(burn.TimeSeconds, burn.DeltaVVlf)));
         }
         return new StockBurnScan(stockBurns, patchChainReady);
     }

@@ -139,4 +139,14 @@ public class PlannerKernelTests
         // The panel-time orbit parent is only the no-patch fallback.
         Assert.Equal("Earth", PlannerKernel.BurnBasisParent(null, "Earth"));
     }
+
+    [Theory]
+    [InlineData(10_000, 0, true)]
+    [InlineData(30, 0, false)] // too close to ignition to touch
+    [InlineData(double.NaN, 0, false)] // hostile stock burn time
+    public void Automatic_rewrites_require_a_burn_safely_before_ignition(
+        double burnTime, double now, bool expected)
+    {
+        Assert.Equal(expected, PlannerKernel.SafelyAheadForRewrite(burnTime, now));
+    }
 }

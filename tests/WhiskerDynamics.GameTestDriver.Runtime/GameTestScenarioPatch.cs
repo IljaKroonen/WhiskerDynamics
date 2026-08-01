@@ -30,12 +30,15 @@ internal static class GameTestScenarioPatch
     private static GameTestPlayerLunarCorrectionSolveJob? _playerLunarCorrectionJob;
     private static bool _playerLunarCorrectionQueued;
     private static FlightPlanModel? _playerLunarPlan;
-    private static GameTestLunarPeriluneProbeJob? _lunarPeriluneProbeJob;
+    private static int _autoStagesActivated;
+    private static int _autoStageSettleFrames;
     private static GameTestPlayerLunarCircularizationSolveJob?
         _playerLunarCircularizationJob;
-    private static bool _earthSoiCircularizationReproArmed;
-    private static bool _earthSoiCircularizationNodeLossLogged;
-    private static int _automaticBurnTargetsLostAtSoi;
+    private static int _lunarCircularizationPlanStage;
+    private static int _lunarCircularizationPlanSettleFrames;
+    private static double? _lunarOrbitStartTime;
+    private static double _lunarOrbitPeriod;
+    private static StateVector _lunarOrbitStartState;
     private static bool _finished;
 
     static void Postfix()
@@ -114,8 +117,8 @@ internal static class GameTestScenarioPatch
                 PlanAndExecuteLunarTransfer(step);
                 break;
 
-            case "assert-perilune-altitude-between":
-                AssertPeriluneAltitudeBetween(step);
+            case "auto-stage":
+                AutoStage(step);
                 break;
 
             case "plan-lunar-circularization-from-earth-soi":
@@ -126,8 +129,8 @@ internal static class GameTestScenarioPatch
                 ExecuteBurns(step);
                 break;
 
-            case "assert-bad-lunar-circularization":
-                AssertBadLunarCircularization(step);
+            case "complete-lunar-orbit":
+                CompleteLunarOrbit(step);
                 break;
 
             case "assert-parent":
@@ -145,6 +148,45 @@ internal static class GameTestScenarioPatch
                 throw new InvalidDataException($"unknown action '{step.Action}'");
         }
     }
+
+    private static void AutoStage(GameTestStep step)
+    {
+        Vehicle vessel = ResolveVehicle(step.Vessel);
+        int count = step.StageCount ?? 1;
+        Require(count > 0, "auto-stage count must be positive");
+        if (_autoStagesActivated < count)
+        {
+            if (_autoStageSettleFrames++ < 2)
+                return;
+            // ActivateNextSequence is a silent no-op when no unactivated sequence
+            // remains; probe first so staging nothing fails loudly.
+            Require(vessel.Parts.SequenceList.GetNextSequenceNumber() >= 0,
+                $"no unactivated staging sequence remains for stage "
+                + $"{_autoStagesActivated + 1}/{count}");
+            int before = vessel.Parts.SequenceList.ActiveSequence;
+            vessel.Parts.SequenceList.ActivateNextSequence(vessel);
+            _autoStagesActivated++;
+            _autoStageSettleFrames = 0;
+            ModLog.Info($"game test: activated staging sequence "
+                + $"{_autoStagesActivated}/{count} (active sequence {before} -> "
+                + $"{vessel.Parts.SequenceList.ActiveSequence})");
+            return;
+        }
+        if (_autoStageSettleFrames++ < 4)
+            return;
+        int activeCores = 0;
+        foreach (RocketCore core in vessel.Parts.RocketCores.Modules)
+            if (core.Controller is EngineController { IsActive: true })
+                activeCores++;
+        // Ignition can take a while to report an active controller; poll within
+        // the step timeout instead of failing one-shot.
+        if (activeCores == 0)
+            return;
+        Pass(step, $"activated {count} staging sequences; "
+            + $"active main-engine cores {activeCores}, vacuum flow "
+            + $"{vessel.FlightComputer.VehicleConfig.TotalEngineVacuumMassFlowRate:F3} kg/s");
+    }
+
     private static void PlanAndExecuteLunarTransfer(GameTestStep step)
     {
         Vehicle vessel = ResolveVehicle(step.Vessel);
@@ -238,7 +280,9 @@ internal static class GameTestScenarioPatch
         IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vessel);
         if (_burnsExecuted == 0)
         {
-            Require(ReferenceEquals(FlightPlans.TryGet(vessel.Id), _playerLunarPlan),
+            // Null marks the plan ExecuteBurns already deleted on completion.
+            Require(_playerLunarPlan is null || ReferenceEquals(
+                    FlightPlans.TryGet(vessel.Id), _playerLunarPlan),
                 "the mod flight plan was removed or replaced during TLI");
             if (_burnExecutionStage == 0 && burns.Count <= _baselineBurnCount)
                 return;
@@ -296,17 +340,16 @@ internal static class GameTestScenarioPatch
                 ?? "player-style lunar correction produced no result");
         if (!_playerLunarCorrectionQueued)
         {
-            Require(ReferenceEquals(FlightPlans.TryGet(vessel.Id), _playerLunarPlan),
-                "the mod flight plan was removed or replaced after TLI");
-            string rebase = BurnPlannerPanel.RebasePlanForGameTest(
-                registry, vessel);
-            Require(rebase.StartsWith("plan rebased", StringComparison.Ordinal),
-                $"could not rebase the player flight plan after TLI: {rebase}");
+            Require(FlightPlans.TryGet(vessel.Id) is null,
+                "the completed TLI flight plan was not deleted");
             string verdict = BurnPlannerPanel.PlanBurnForGameTest(
                 registry, vessel, correction.BurnTime,
                 frame: null, components: correction.DeltaVVlf);
             Require(verdict.StartsWith("queued", StringComparison.Ordinal),
                 $"lunar correction burn was not queued: {verdict}");
+            _playerLunarPlan = FlightPlans.TryGet(vessel.Id)
+                ?? throw new InvalidOperationException(
+                    "planner queued the correction without creating a new flight plan");
             _playerLunarCorrectionQueued = true;
             ModLog.Info($"game test: queued one-hour lunar correction "
                 + $"dvVlf=({correction.DeltaVVlf.X:F3}, "
@@ -319,7 +362,8 @@ internal static class GameTestScenarioPatch
         burns = BurnPlanWriter.Snapshot(vessel);
         if (_burnsExecuted == 1)
         {
-            Require(ReferenceEquals(FlightPlans.TryGet(vessel.Id), _playerLunarPlan),
+            Require(_playerLunarPlan is null || ReferenceEquals(
+                    FlightPlans.TryGet(vessel.Id), _playerLunarPlan),
                 "the mod flight plan was removed or replaced during correction");
             if (_burnExecutionStage == 0 && burns.Count == 0)
                 return;
@@ -328,60 +372,6 @@ internal static class GameTestScenarioPatch
         }
         Pass(step, $"executed 3150 m/s prograde TLI and "
             + $"{correction.DeltaVVlf.Length():F3} m/s correction at departure +1 h");
-    }
-
-    private static void AssertPeriluneAltitudeBetween(GameTestStep step)
-    {
-        Vehicle vessel = ResolveVehicle(step.Vessel);
-        double minimum = Required(step.MinPeriluneAltitudeMeters,
-            "minimumPeriluneAltitudeMeters");
-        double maximum = Required(step.MaxPeriluneAltitudeMeters,
-            "maximumPeriluneAltitudeMeters");
-        Require(minimum >= 0 && maximum >= minimum,
-            "perilune altitude range is invalid");
-        RailsService rails = ModServices.Rails
-            ?? throw new InvalidOperationException("rails service is unavailable");
-        if (_lunarPeriluneProbeJob is null)
-        {
-            VesselRegistry registry = ModServices.Vessels
-                ?? throw new InvalidOperationException("vessel registry is unavailable");
-            if (!registry.TryCaptureRailsAuthority(
-                    vessel, out var authority, out var authorityReason))
-                throw new InvalidOperationException(
-                    $"'{vessel.Id}' perilune predictor is unavailable: "
-                    + PredictorAuthorityPolicy.Describe(authorityReason));
-            double now = Universe.GetElapsedSimTime().Seconds();
-            if (!authority.Tracked.TryCaptureSolverSeed(
-                    authority.Lineage, now, out StateVector seedState))
-                return;
-            double end = Math.Min(rails.Horizon, now + 5 * 86400);
-            RailsService.PredictionContext? prediction =
-                rails.TryCaptureSolverPredictionContext(now, end);
-            if (prediction is null)
-                return;
-            _lunarPeriluneProbeJob = new GameTestLunarPeriluneProbeJob
-            {
-                Prediction = prediction,
-                SeedState = seedState,
-                StartTime = now,
-                EndTime = end,
-                LunaRadiusMeters = rails.MeanRadiusOf("Luna"),
-            };
-            _lunarPeriluneProbeJob.Start();
-            return;
-        }
-        if (!_lunarPeriluneProbeJob.Done)
-            return;
-        if (_lunarPeriluneProbeJob.PeriluneRadiusMeters is not { } radius)
-            throw new InvalidOperationException(
-                _lunarPeriluneProbeJob.Failure
-                ?? "lunar perilune probe produced no result");
-        double altitude = radius - rails.MeanRadiusOf("Luna");
-        Require(altitude >= minimum && altitude <= maximum,
-            $"predicted lunar perilune altitude {altitude:R} m is outside "
-            + $"[{minimum:R}, {maximum:R}] m");
-        Pass(step, $"predicted lunar perilune altitude "
-            + $"{altitude / 1000:F1} km");
     }
 
     private static void PlanLunarCircularizationFromEarthSoi(GameTestStep step)
@@ -435,77 +425,227 @@ internal static class GameTestScenarioPatch
         Require(solution.BurnTime >= nowAfterSolve + PlannerKernel.MinLeadSeconds,
             $"predicted lunar circularization t={solution.BurnTime:F1} is too close "
             + $"or already past at t={nowAfterSolve:F1}");
-        if (!_stepIssued)
+        double minimumAltitude = Required(step.MinPeriluneAltitudeMeters,
+            "minimumPeriluneAltitudeMeters");
+        double maximumAltitude = Required(step.MaxPeriluneAltitudeMeters,
+            "maximumPeriluneAltitudeMeters");
+        Require(minimumAltitude <= maximumAltitude,
+            "minimum lunar perilune altitude exceeds maximum");
+        double periluneAltitude =
+            solution.PeriluneRadiusMeters - rails.MeanRadiusOf("Luna");
+        Require(periluneAltitude >= minimumAltitude
+                && periluneAltitude <= maximumAltitude,
+            $"predicted lunar perilune altitude {periluneAltitude:R} m is outside "
+            + $"[{minimumAltitude:R}, {maximumAltitude:R}] m");
+        var frame = new FrameSpec(FrameKind.Inertial, "Luna", null);
+        if (_lunarCircularizationPlanStage == 0)
         {
-            var frame = new FrameSpec(FrameKind.Inertial, "Luna", null);
-            if (FlightPlans.TryGet(vessel.Id) is { Diverged: true })
+            Require(FlightPlans.TryGet(vessel.Id) is null,
+                "the completed transfer flight plan was not deleted");
+            string verdict = BurnPlannerPanel.CreatePlanForGameTest(vessel);
+            Require(verdict == "plan created",
+                $"could not create a fresh circularization plan: {verdict}");
+            _playerLunarPlan = FlightPlans.TryGet(vessel.Id)
+                ?? throw new InvalidOperationException(
+                    "planner did not retain the fresh circularization plan");
+            _lunarCircularizationPlanStage = 1;
+            _lunarCircularizationPlanSettleFrames = 0;
+            ModLog.Info("game test: created a fresh flight plan for LCI after "
+                + "deleting the completed transfer plan");
+            return;
+        }
+
+        if (_lunarCircularizationPlanStage == 1)
+        {
+            if (_lunarCircularizationPlanSettleFrames++ < 4)
+                return;
+            string verdict = BurnPlannerPanel.AddPlaceholderBurnForGameTest(
+                registry, vessel, frame);
+            if (verdict == "rejected: plan diverged; rebase it before adding a burn")
             {
+                // A live-physics episode can mark the fresh plan Diverged; recover
+                // like a player: rebase once thrust settles, retry next frame.
                 string rebase = BurnPlannerPanel.RebasePlanForGameTest(
                     registry, vessel);
-                Require(rebase.StartsWith("plan rebased", StringComparison.Ordinal),
-                    $"could not rebase before circularization: {rebase}");
+                if (rebase != "rejected: rebase is unavailable until thrust stops")
+                    ModLog.Info("game test: fresh LCI plan diverged before the "
+                        + $"placeholder; rebase: {rebase}");
+                return;
             }
-            string verdict = BurnPlannerPanel.PlanBurnForGameTest(
-                registry, vessel, solution.BurnTime,
-                frame, solution.LunaFrameDeltaVPrn);
             Require(verdict.StartsWith("queued", StringComparison.Ordinal),
-                $"Earth-SOI lunar circularization was not queued: {verdict}");
-            if (_playerLunarPlan is not null)
-                Require(ReferenceEquals(
-                        FlightPlans.TryGet(vessel.Id), _playerLunarPlan),
-                    "circularization replaced the lunar-transfer flight plan");
-            _earthSoiCircularizationReproArmed = true;
-            _earthSoiCircularizationNodeLossLogged = false;
-            _stepIssued = true;
-            ModLog.Info($"game test: queued player-style Luna-frame circularization "
-                + $"from Earth SOI at t={solution.BurnTime:F1}: authored PRN=("
+                $"Earth-SOI lunar circularization placeholder was not queued: {verdict}");
+            Require(ReferenceEquals(
+                    FlightPlans.TryGet(vessel.Id), _playerLunarPlan),
+                "circularization replaced its fresh flight plan");
+            _lunarCircularizationPlanStage = 2;
+            _lunarCircularizationPlanSettleFrames = 0;
+            ModLog.Info("game test: added the Luna-frame zero-dv placeholder "
+                + "through the same path as the planner Add burn button");
+            return;
+        }
+
+        IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vessel);
+        if (burns.Count <= _baselineBurnCount)
+        {
+            // Stage 2 legitimately waits for the queued placeholder to land; once a
+            // later stage has edited it, an empty plan means KSA dropped the node.
+            Require(_lunarCircularizationPlanStage == 2,
+                "the circularization placeholder disappeared while it was being edited");
+            return;
+        }
+        Burn burn = burns[0];
+        if (_lunarCircularizationPlanStage == 2)
+        {
+            if (_lunarCircularizationPlanSettleFrames++ < 4)
+                return;
+            string verdict = BurnPlannerPanel.MoveBurnForGameTest(
+                registry, vessel, burn, solution.BurnTime);
+            // Exact-match: reconversion FAILURE statuses also begin with "time applied".
+            Require(verdict is "time applied"
+                    or "time applied; dv reconverted in authoring frame",
+                $"Earth-SOI lunar circularization time edit failed: {verdict}");
+            _lunarCircularizationPlanStage = 3;
+            _lunarCircularizationPlanSettleFrames = 0;
+            ModLog.Info($"game test: moved the Luna-frame placeholder to "
+                + $"predicted perilune t={solution.BurnTime:F1}");
+            return;
+        }
+
+        if (_lunarCircularizationPlanStage == 3)
+        {
+            if (_lunarCircularizationPlanSettleFrames++ < 4)
+                return;
+            Require(BurnIdentityPolicy.SameBurn(
+                    burn.Time.Seconds(), solution.BurnTime),
+                "KSA did not retain the circularization time edit");
+            string verdict = BurnPlannerPanel.EditBurnComponentsForGameTest(
+                registry, vessel, burn, solution.LunaFrameDeltaVPrn);
+            Require(verdict == "applied",
+                $"Earth-SOI lunar circularization component edit failed: {verdict}");
+            _lunarCircularizationPlanStage = 4;
+            _lunarCircularizationPlanSettleFrames = 0;
+            ModLog.Info($"game test: entered the pure-retrograde LCI components "
+                + $"at t={solution.BurnTime:F1}: authored PRN=("
                 + $"{solution.LunaFrameDeltaVPrn.X:F3}, "
                 + $"{solution.LunaFrameDeltaVPrn.Y:F3}, "
                 + $"{solution.LunaFrameDeltaVPrn.Z:F3}) m/s");
             return;
         }
-        IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vessel);
-        if (burns.Count <= _baselineBurnCount)
+
+        if (_lunarCircularizationPlanSettleFrames++ < 4)
             return;
+        Require(BurnIdentityPolicy.SameBurn(
+                burn.Time.Seconds(), solution.BurnTime),
+            "KSA did not retain the circularization node after component entry");
         Pass(step, $"planned {solution.LunaFrameDeltaVPrn.Length():F2} m/s "
-            + $"Luna-frame circularization at predicted perilune "
-            + $"{solution.PeriluneRadiusMeters / 1000:F1} km radius "
+            + $"pure retrograde LCI circularization burn at predicted perilune "
+            + $"{periluneAltitude / 1000:F1} km altitude "
             + "while still in Earth SOI");
     }
 
-    private static void AssertBadLunarCircularization(GameTestStep step)
+    private readonly record struct LunarOrbitMetrics(
+        double Energy, double Eccentricity,
+        double PeriluneRadius, double ApoluneRadius, double Period);
+
+    private static void CompleteLunarOrbit(GameTestStep step)
     {
         Vehicle vessel = ResolveVehicle(step.Vessel);
         Require((vessel.Orbit.Parent as Astronomical)?.Id == "Luna",
-            "circularization repro did not reach Luna SOI");
-        double minimumEccentricity = Required(step.MinEccentricity,
-            "minimumEccentricity");
-        Require(minimumEccentricity > 0 && minimumEccentricity < 1,
-            "minimum bad-orbit eccentricity must be in (0, 1)");
+            "lunar circularization did not leave the vessel in Luna SOI");
+        double maximumEccentricity = Required(step.MaxEccentricity,
+            "maximumEccentricity");
+        Require(maximumEccentricity > 0 && maximumEccentricity < 1,
+            "maximum lunar-orbit eccentricity must be in (0, 1)");
+
+        double now = Universe.GetElapsedSimTime().Seconds();
+        if (_lunarOrbitStartTime is null)
+        {
+            StateVector start = VesselRelativeToBody(vessel, "Luna");
+            LunarOrbitMetrics accepted = LunarOrbit(start);
+            RequireCircularLunarOrbit(accepted, maximumEccentricity,
+                ModServices.Rails!.MeanRadiusOf("Luna"));
+            _lunarOrbitStartTime = now;
+            _lunarOrbitPeriod = accepted.Period;
+            _lunarOrbitStartState = start;
+            ModLog.Info($"game test: circular lunar orbit accepted at "
+                + $"e={accepted.Eccentricity:F4}; coasting one {accepted.Period:F1} s "
+                + "osculating period at up to 1000x");
+            return;
+        }
+
+        double remaining = _lunarOrbitStartTime.Value + _lunarOrbitPeriod - now;
+        double desiredSpeed = remaining switch
+        {
+            > 300 => 1_000,
+            > 30 => 100,
+            > 3 => 10,
+            _ => 1,
+        };
+        if (Universe.GetSimulationSpeed() != desiredSpeed)
+            Universe.SetSimulationSpeed(desiredSpeed);
+        // Osculating metrics legitimately wobble during the n-body coast, so the
+        // orbit-shape requirements run only at the two endpoints.
+        if (remaining > 0)
+            return;
+
+        Universe.SetSimulationSpeed(1.0);
         StateVector state = VesselRelativeToBody(vessel, "Luna");
+        double lunaRadius = ModServices.Rails!.MeanRadiusOf("Luna");
+        LunarOrbitMetrics orbit = LunarOrbit(state);
+        RequireCircularLunarOrbit(orbit, maximumEccentricity, lunaRadius);
+        // A hitched wall frame at 1000x can overshoot the one-period target, so
+        // judge the phase against the coast time that actually elapsed. Two-body
+        // propagation keeps the expectation in the same angular domain as the
+        // measurement; a mean-motion expectation would be off by the equation of
+        // center (up to ~28.6 deg at e=0.25).
+        StateVector expected = Kepler.PropagateUniversal(
+            _lunarOrbitStartState, ModServices.Rails!.MuOf("Luna"),
+            now - _lunarOrbitStartTime.Value);
+        double phaseCosine = Math.Clamp(
+            expected.Position.Normalized().Dot(state.Position.Normalized()), -1, 1);
+        double phaseErrorDegrees = Math.Acos(phaseCosine) * 180 / Math.PI;
+        Require(phaseErrorDegrees <= 30,
+            $"one-period lunar coast ended {phaseErrorDegrees:F1} deg from "
+            + "its expected orbital phase");
+        Pass(step, $"completed one {_lunarOrbitPeriod:F1} s lunar orbit; "
+            + $"Pe {(orbit.PeriluneRadius - lunaRadius) / 1000:F1} km, "
+            + $"Ap {(orbit.ApoluneRadius - lunaRadius) / 1000:F1} km, "
+            + $"e={orbit.Eccentricity:F4}, phase error {phaseErrorDegrees:F1} deg");
+    }
+
+    private static void RequireCircularLunarOrbit(
+        LunarOrbitMetrics orbit, double maximumEccentricity, double lunaRadius)
+    {
+        Require(orbit.Energy < 0 && double.IsFinite(orbit.Period),
+            $"lunar circularization did not produce a bound orbit; "
+            + $"specific energy={orbit.Energy:R} J/kg");
+        Require(orbit.PeriluneRadius > lunaRadius,
+            $"lunar orbit intersects the surface: Pe radius "
+            + $"{orbit.PeriluneRadius:R} m, Luna radius {lunaRadius:R} m");
+        Require(orbit.Eccentricity <= maximumEccentricity,
+            $"lunar orbit eccentricity {orbit.Eccentricity:R} exceeds "
+            + $"{maximumEccentricity:R}");
+    }
+
+    private static LunarOrbitMetrics LunarOrbit(in StateVector state)
+    {
         double mu = ModServices.Rails!.MuOf("Luna");
         double radius = state.Position.Length();
-        double speedSquared = state.Velocity.Dot(state.Velocity);
-        double energy = 0.5 * speedSquared - mu / radius;
+        double energy = 0.5 * state.Velocity.LengthSquared() - mu / radius;
         Vector3d angularMomentum = state.Position.Cross(state.Velocity);
         Vector3d eccentricityVector = state.Velocity.Cross(angularMomentum) / mu
             - state.Position / radius;
         double eccentricity = eccentricityVector.Length();
-        double perilune = double.NaN;
-        double apolune = double.PositiveInfinity;
-        if (energy < 0)
-        {
-            double semiMajorAxis = -mu / (2 * energy);
-            perilune = semiMajorAxis * (1 - eccentricity);
-            apolune = semiMajorAxis * (1 + eccentricity);
-        }
-        Require(energy >= 0 || eccentricity >= minimumEccentricity,
-            $"expected bad circularization, but orbit is bound with "
-            + $"eccentricity {eccentricity:R} below {minimumEccentricity:R}");
-        Pass(step, energy >= 0
-            ? $"reproduced bad circularization: unbound lunar trajectory, e={eccentricity:F4}"
-            : $"reproduced bad circularization: Pe {perilune / 1000:F0} km, "
-                + $"Ap {apolune / 1000:F0} km, e={eccentricity:F4}");
+        if (!(energy < 0))
+            return new LunarOrbitMetrics(
+                energy, eccentricity, double.NaN, double.PositiveInfinity,
+                double.PositiveInfinity);
+        double semiMajorAxis = -mu / (2 * energy);
+        return new LunarOrbitMetrics(
+            energy, eccentricity,
+            semiMajorAxis * (1 - eccentricity),
+            semiMajorAxis * (1 + eccentricity),
+            RendezvousKernel.OrbitalPeriod(state, mu));
     }
 
     private static StateVector VesselRelativeToBody(Vehicle vessel, string bodyId)
@@ -550,14 +690,19 @@ internal static class GameTestScenarioPatch
         _playerLunarTransferJob = null;
         _playerLunarCorrectionJob = null;
         _playerLunarCorrectionQueued = false;
-        _lunarPeriluneProbeJob = null;
+        _autoStagesActivated = 0;
+        _autoStageSettleFrames = 0;
         _playerLunarCircularizationJob = null;
+        _lunarCircularizationPlanStage = 0;
+        _lunarCircularizationPlanSettleFrames = 0;
         _burnExecutionStage = 0;
         _burnExecutionBaselineCount = 0;
         _burnsExecuted = 0;
         _burnTargetMagnitude = 0;
         _burnExecutionWarpEngaged = false;
-        _automaticBurnTargetsLostAtSoi = 0;
+        _lunarOrbitStartTime = null;
+        _lunarOrbitPeriod = 0;
+        _lunarOrbitStartState = default;
     }
 
     private static void Fail(string error)
@@ -625,12 +770,8 @@ internal static class GameTestScenarioPatch
             {
                 Require(_burnsExecuted > 0, "there were no burns to execute");
                 Universe.SetSimulationSpeed(1.0);
-                string detail = _automaticBurnTargetsLostAtSoi > 0
-                    ? "reproduced stock circularization failure: built-in Auto Warp "
-                        + "unloaded its node and Auto Burn target at Luna SOI"
-                    : $"executed {_burnsExecuted} burn(s) through KSA "
-                        + "flight computer Auto and built-in Auto Warp";
-                Pass(step, detail);
+                Pass(step, $"executed {_burnsExecuted} burn(s) through KSA "
+                    + "flight computer Auto and built-in Auto Warp");
                 return;
             }
             if (computer.Burn is not { } target) return;
@@ -648,13 +789,8 @@ internal static class GameTestScenarioPatch
 
         if (_burnExecutionStage == 1)
         {
-            if (burns.Count < _burnExecutionBaselineCount)
-            {
-                Require(_earthSoiCircularizationReproArmed,
-                    "burn plan disappeared while automatic execution was arming");
-                LogExpectedCircularizationNodeLoss(computer);
-                return;
-            }
+            Require(burns.Count >= _burnExecutionBaselineCount,
+                "planned burn disappeared while automatic execution was arming");
             if (computer.Burn is not { } target) return;
             if (computer.BurnMode != FlightComputerBurnMode.Auto) return;
             // Auto mode makes KSA compute finite burn duration and the centered
@@ -675,24 +811,16 @@ internal static class GameTestScenarioPatch
 
         if (_burnExecutionStage == 2)
         {
-            bool stockNodeMissing = burns.Count < _burnExecutionBaselineCount;
-            if (stockNodeMissing)
+            // Losing the armed node here is the regression this suite exists to
+            // catch — fail it by name instead of the wall timeout. KSA can null the
+            // BurnTarget for a frame across an SOI-boundary recalculation, so a
+            // null target is tolerated while the node survives.
+            if (computer.Burn is not { } target)
             {
-                Require(_earthSoiCircularizationReproArmed,
+                Require(burns.Count >= _burnExecutionBaselineCount,
                     "burn plan disappeared before automatic burn completion");
-                LogExpectedCircularizationNodeLoss(computer);
-                if (computer.Burn is null)
-                {
-                    Universe.AutoWarpStop(resetSimulationSpeed: false);
-                    Universe.SetSimulationSpeed(1.0);
-                    _automaticBurnTargetsLostAtSoi++;
-                    _burnExecutionStage = 4;
-                    ModLog.Info("game test: accepting the unloaded circularization "
-                        + "Auto Burn target as the expected bad-orbit repro outcome");
-                    return;
-                }
+                return;
             }
-            if (computer.Burn is not { } target) return;
             if (Universe.IsAutoWarpActive) return;
             if (computer.BurnMode == FlightComputerBurnMode.Auto)
             {
@@ -703,12 +831,20 @@ internal static class GameTestScenarioPatch
                     + "before ignition");
                 if (!_burnExecutionWarpEngaged)
                 {
-                    double burnWarp = _earthSoiCircularizationReproArmed
-                        ? 4.0 : 10.0;
-                    Universe.SetSimulationSpeed(burnWarp);
                     _burnExecutionWarpEngaged = true;
-                    ModLog.Info("game test: built-in Auto Warp finished; "
-                        + $"set engine burn warp to {burnWarp:R}x");
+                    if (step.LunarCircularization ?? false)
+                    {
+                        ModLog.Info("game test: built-in Auto Warp finished for "
+                            + "lunar circularization; leaving KSA simulation speed "
+                            + $"at {Universe.GetSimulationSpeed():R}x");
+                    }
+                    else
+                    {
+                        double burnWarp = _burnTargetMagnitude < 100 ? 1.0 : 10.0;
+                        Universe.SetSimulationSpeed(burnWarp);
+                        ModLog.Info("game test: built-in Auto Warp finished; "
+                            + $"set engine burn warp to {burnWarp:R}x");
+                    }
                 }
                 return;
             }
@@ -728,53 +864,42 @@ internal static class GameTestScenarioPatch
                     && (completionDot <= 0
                         || remaining <= automaticBurnResidualToleranceMps),
                 $"automatic burn stopped with {remaining:F2} m/s remaining of {_burnTargetMagnitude:F2} m/s");
+            if (step.LunarCircularization ?? false)
+            {
+                _burnsExecuted++;
+                Pass(step, "executed the LCI burn through KSA flight computer "
+                    + "Auto and built-in Auto Warp without test-side plan edits");
+                return;
+            }
             _burnExecutionStage = 3;
-            ModLog.Info("game test: Auto cutoff acknowledged; keeping the planned "
-                + "burn until the mod's live delta-v witness settles");
+            ModLog.Info("game test: Auto cutoff acknowledged; deleting the "
+                + "completed plan and burns through the planner");
             return;
         }
 
         if (_burnExecutionStage == 3)
         {
-            if (burns.Count == 0 && _earthSoiCircularizationReproArmed)
-            {
-                ModLog.Info("game test: completed circularization Auto Burn target "
-                    + "had no stock node left to clean up after the SOI transition");
-                _burnExecutionStage = 4;
-                return;
-            }
-            VesselRegistry vessels = ModServices.Vessels
-                ?? throw new InvalidOperationException("vessel registry is unavailable");
-            string verdict = BurnPlannerPanel.RemoveCompletedBurnForGameTest(
-                vessels, vessel);
-            if (verdict.StartsWith("waiting:", StringComparison.Ordinal))
-                return;
-            Require(verdict == "queued",
-                $"planner did not remove its completed burn: {verdict}");
-            ModLog.Info("game test: mod planner removed its completed burn after "
-                + "live delta-v stayed quiet for the full coast interval");
+            string verdict = BurnPlannerPanel.DeletePlanAndBurns(vessel);
+            Require(verdict.StartsWith("plan deleted", StringComparison.Ordinal),
+                $"planner did not delete its completed flight plan: {verdict}");
+            _playerLunarPlan = null;
+            ModLog.Info("game test: used the planner's Delete plan and burns "
+                + "action after the completed burn");
             _burnExecutionStage = 4;
             return;
         }
 
-        if (burns.Count >= _burnExecutionBaselineCount) return;
-        _burnsExecuted++;
-        _burnExecutionStage = 0;
-        _burnExecutionWarpEngaged = false;
-        _earthSoiCircularizationReproArmed = false;
-        _earthSoiCircularizationNodeLossLogged = false;
-    }
+        if (_burnExecutionStage == 4)
+        {
+            if (burns.Count >= _burnExecutionBaselineCount) return;
+            _burnsExecuted++;
+            _burnExecutionStage = 0;
+            _burnExecutionWarpEngaged = false;
+            return;
+        }
 
-    private static void LogExpectedCircularizationNodeLoss(
-        FlightComputer computer)
-    {
-        if (_earthSoiCircularizationNodeLossLogged) return;
-        _earthSoiCircularizationNodeLossLogged = true;
-        ModLog.Info("game test: stock circularization node absent during the "
-            + "Earth-to-Luna SOI Auto Warp transition; active target="
-            + $"{(computer.Burn is null ? "none" : "present")}, "
-            + $"mode={computer.BurnMode}, autoWarp={Universe.IsAutoWarpActive}, "
-            + $"speed={Universe.GetSimulationSpeed():R}x");
+        throw new InvalidOperationException(
+            $"unknown burn execution stage {_burnExecutionStage}");
     }
 
     private static void QueueFlightComputer(Vehicle vehicle, Enum value) =>

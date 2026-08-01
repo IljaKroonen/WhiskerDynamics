@@ -20,7 +20,7 @@ public class GameTestHostTests
     }
 
     [Fact]
-    public void Moon_transfer_reproduces_auto_warp_circularization_from_earth_soi()
+    public void Moon_transfer_circularizes_and_completes_one_lunar_orbit()
     {
         GameTestScenario scenario = new MoonTransferScenario().Create();
         string[] actions = scenario.Steps.Select(step => step.Action).ToArray();
@@ -28,12 +28,12 @@ public class GameTestHostTests
         Assert.Equal(
         [
             "wait-ready",
+            "auto-stage",
             "assert-parent",
             "plan-and-execute-lunar-transfer",
-            "assert-perilune-altitude-between",
             "plan-lunar-circularization-from-earth-soi",
             "execute-burns",
-            "assert-bad-lunar-circularization",
+            "complete-lunar-orbit",
         ], actions);
 
         GameTestStep transfer = scenario.Steps.Single(
@@ -41,25 +41,32 @@ public class GameTestHostTests
         Assert.Equal(1, transfer.OrbitOffset);
         Assert.Equal(3_150, transfer.DeltaVMetersPerSecond);
         Assert.Equal(3_600, transfer.CorrectionTimescaleSeconds);
-        Assert.Equal(500_000, transfer.TargetRadiusMeters);
+        Assert.Equal(200_000, transfer.TargetRadiusMeters);
 
-        GameTestStep assertion = scenario.Steps.Single(
-            step => step.Action == "assert-perilune-altitude-between");
-        Assert.Equal(200_000, assertion.MinPeriluneAltitudeMeters);
-        Assert.Equal(800_000, assertion.MaxPeriluneAltitudeMeters);
+        GameTestStep staging = scenario.Steps.Single(
+            step => step.Action == "auto-stage");
+        Assert.Equal("Rocket", staging.Vessel);
+        Assert.Equal(2, staging.StageCount);
+        Assert.Equal(30, staging.TimeoutSeconds);
 
         GameTestStep circularization = scenario.Steps.Single(
             step => step.Action == "plan-lunar-circularization-from-earth-soi");
         Assert.Equal("Rocket", circularization.Vessel);
+        Assert.Equal(100_000, circularization.MinPeriluneAltitudeMeters);
+        Assert.Equal(300_000, circularization.MaxPeriluneAltitudeMeters);
+        Assert.Equal(300, circularization.TimeoutSeconds);
         Assert.Null(circularization.TargetRadiusMeters);
 
         GameTestStep execute = scenario.Steps.Single(
             step => step.Action == "execute-burns");
         Assert.Equal("Rocket", execute.Vessel);
+        Assert.Equal(true, execute.LunarCircularization);
 
-        GameTestStep badOrbit = scenario.Steps.Single(
-            step => step.Action == "assert-bad-lunar-circularization");
-        Assert.Equal(0.02, badOrbit.MinEccentricity);
+        GameTestStep completeOrbit = scenario.Steps.Single(
+            step => step.Action == "complete-lunar-orbit");
+        Assert.Equal("Rocket", completeOrbit.Vessel);
+        Assert.Equal(0.25, completeOrbit.MaxEccentricity);
+        Assert.Equal(300, completeOrbit.TimeoutSeconds);
     }
 
     [Fact]
@@ -97,6 +104,17 @@ public class GameTestHostTests
 
         Assert.Equal(0, exitCode);
         Assert.Collection(harness.Commands.Runs,
+            publishMod =>
+            {
+                Assert.Equal("dotnet", publishMod.FileName);
+                Assert.Equal(
+                [
+                    "publish",
+                    "-c", "Release",
+                    "src/WhiskerDynamics.Mod/WhiskerDynamics.Mod.csproj",
+                ], publishMod.Arguments);
+                Assert.Equal(harness.Root, publishMod.WorkingDirectory);
+            },
             publish =>
             {
                 Assert.Equal("dotnet", publish.FileName);
@@ -105,8 +123,6 @@ public class GameTestHostTests
                     "publish",
                     "-c", "Release",
                     "tests/WhiskerDynamics.GameTestDriver/WhiskerDynamics.GameTestDriver.csproj",
-                    "--disable-build-servers",
-                    "-m:1",
                 ], publish.Arguments);
                 Assert.Equal(harness.Root, publish.WorkingDirectory);
             },

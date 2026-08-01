@@ -96,14 +96,13 @@ static int PublishGitHubRelease(string[] args)
         if (!options.SkipTests)
             Run(
                 "dotnet",
-                ["test", "WhiskerDynamics.slnx", "--configuration", "Release",
-                    "--disable-build-servers", "-m:1"],
+                ["test", "WhiskerDynamics.slnx", "--configuration", "Release"],
                 repoRoot);
 
         Run(
             "dotnet",
             ["run", "--file", "scripts/create-spacedock-bundle.cs",
-                "--disable-build-servers", "--", options.Version, "Release"],
+                "--", options.Version, "Release"],
             repoRoot);
 
         if (!File.Exists(bundlePath))
@@ -165,7 +164,7 @@ static ReleaseOptions ParseOptions(string[] args)
     if (args.Length == 0)
         throw new ArgumentException(
             "usage: dotnet run --file scripts/publish-github-release.cs "
-            + "--disable-build-servers -- <Version> "
+            + "-- <Version> "
             + "[--draft] [--prerelease] [--skip-tests] [--remote <Name>]");
 
     var version = args[0];

@@ -102,10 +102,22 @@ public static class BurnPlanWriter
     /// adds/removes mirror optimistically — stock applies them next frame, and a
     /// stock-side rejection of an already-validated queued write has no known path.</summary>
     private static void MirrorSnapshotSet(Vehicle vehicle, double timeSeconds,
-        WhiskerDynamics.Core.Vector3d dvVlf, string? basisParentId) =>
+        WhiskerDynamics.Core.Vector3d dvVlf, string? basisParentId,
+        WhiskerDynamics.Core.Vector3d? displayDvVlf = null) =>
         FlightPlans.TryGet(vehicle.Id)?.SnapshotSetBurn(
             timeSeconds, dvVlf, basisParentId,
-            markDownstreamParentsPending: true);
+            markDownstreamParentsPending: true,
+            displayDvVlf: displayDvVlf);
+
+    /// <summary>THE planning-side patch resolution, mirroring stock click-to-place.
+    /// Runs inside the burn preservation scope so every planning seam resolves the
+    /// same extended conic past a stock impact prediction.</summary>
+    internal static PatchedConic? ResolvePlanningPatch(Vehicle vehicle, SimTime time)
+    {
+        using (Patches.BurnPlanCalculationContext.EnterForVehicle(vehicle))
+            return vehicle.FlightComputer.BurnPlan.TryGetValidTimeLinePatch(time)
+                ?? vehicle.FlightPlan.TryFindPatch(time);
+    }
 
     public static string TryAdd(Vehicle vehicle, double burnTimeSeconds, double3 dvVlf)
     {
@@ -129,11 +141,7 @@ public static class BurnPlanWriter
             // Only a time that passed every KSA-free admission check may enter
             // SimTime construction and stock patch resolution.
             var time = new SimTime(burnTimeSeconds);
-            // Patch resolution mirrors stock click-to-place: after existing burns the node
-            // chains on the planned timeline (TryGetValidTimeLinePatch); otherwise the
-            // vessel's own flight plan covers it (TryFindPatch).
-            PatchedConic? patch = vehicle.FlightComputer.BurnPlan.TryGetValidTimeLinePatch(time)
-                ?? vehicle.FlightPlan.TryFindPatch(time);
+            PatchedConic? patch = ResolvePlanningPatch(vehicle, time);
             if (patch is null)
                 return PlannerKernel.Describe(PlannerKernel.Verdict.NoPatch);
 
@@ -192,7 +200,10 @@ public static class BurnPlanWriter
         }
     }
 
-    public static string TryEditDv(Vehicle vehicle, Burn burn, double prograde, double normal, double outward)
+    /// <summary><paramref name="displayDvVlf"/>: predictor-basis realization of an
+    /// execution-basis write (upkeep only); ordinary edits leave it null.</summary>
+    public static string TryEditDv(Vehicle vehicle, Burn burn, double prograde, double normal, double outward,
+        WhiskerDynamics.Core.Vector3d? displayDvVlf = null)
     {
         try
         {
@@ -206,7 +217,8 @@ public static class BurnPlanWriter
                 () => burn.Update(vehicle.FlightComputer));
             MirrorSnapshotSet(vehicle, burn.Time.Seconds(),
                 FrameAdapter.ToCore(burn.DeltaVVlf),
-                PlannedBurnConverter.ExistingBurnParentId(vehicle, burn));
+                PlannedBurnConverter.ExistingBurnParentId(vehicle, burn),
+                displayDvVlf);
             return "applied";
         }
         catch (Exception e)

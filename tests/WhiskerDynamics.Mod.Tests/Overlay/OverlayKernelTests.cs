@@ -151,6 +151,34 @@ public class OverlayKernelTests
     }
 
     [Fact]
+    public void FoldSnapshotBurns_folds_the_predictor_basis_display_vector_when_recorded()
+    {
+        double t0 = 0.0, tb = 2000.0, horizon = 6000.0;
+        var stockBasis = new Vector3d(150, 0, 0);
+        var predictorBasis = new Vector3d(120, 60, 30);
+        var display = new TrajectoryPredictor(Gravity(), CircularSeed(), t0, DisplayOptions());
+        int applied = OverlayKernel.FoldSnapshotBurns(display,
+            [new PlanSnapshotBurn(tb, stockBasis, "Earth", predictorBasis)],
+            [tb], t0, horizon, "Earth", (_, _) => default, _ => { }, null, out _);
+        Assert.Equal(1, applied);
+
+        // Bitwise-equal to folding the display vector as stock components, and
+        // visibly different from folding the raw stock components.
+        var reference = new TrajectoryPredictor(Gravity(), CircularSeed(), t0, DisplayOptions());
+        OverlayKernel.FoldSnapshotBurns(reference,
+            [new PlanSnapshotBurn(tb, predictorBasis, "Earth")],
+            [tb], t0, horizon, "Earth", (_, _) => default, _ => { }, null, out _);
+        Assert.Equal(reference.StateAt(horizon), display.StateAt(horizon));
+
+        var rawStock = new TrajectoryPredictor(Gravity(), CircularSeed(), t0, DisplayOptions());
+        OverlayKernel.FoldSnapshotBurns(rawStock,
+            [new PlanSnapshotBurn(tb, stockBasis, "Earth")],
+            [tb], t0, horizon, "Earth", (_, _) => default, _ => { }, null, out _);
+        Assert.True((rawStock.StateAt(horizon).Position - display.StateAt(horizon).Position)
+            .Length() > 1000.0);
+    }
+
+    [Fact]
     public void FoldSnapshotBurns_checks_parent_callback_before_predictor_extension()
     {
         double t0 = 0.0, burnTime = 2000.0, horizon = 4000.0;

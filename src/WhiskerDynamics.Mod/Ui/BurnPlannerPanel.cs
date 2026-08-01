@@ -179,6 +179,109 @@ public static class BurnPlannerPanel
 
     private static void InvalidateAnalysis() => _analysis = null;
 
+    /// <summary>Cadence and warn floors for the execution-basis upkeep: the check
+    /// clones a predictor per burn, so it runs on a wall cadence, not every frame.</summary>
+    private static long _nextBasisUpkeepMs;
+    private static long _nextBasisReconvertWarnMs;
+
+    /// <summary>Execution-basis upkeep for frame-authored burns: stock freezes the
+    /// executed CCI target from the burn-time patch conic, so an SOI handoff or
+    /// conic extrapolation error silently rotates the executed direction (observed:
+    /// 12-25 deg off at Luna perilune). When the stored components drift beyond
+    /// <see cref="PlannerKernel.ExecutionRealizeToleranceMps"/> from the authored
+    /// intent realized against the current stock basis, this rewrites them — the
+    /// carve-out from <see cref="PlannedBurnConverter"/>'s no-automatic-rewrite
+    /// rule. Every rewrite also records the predictor-basis realization (snapshot
+    /// DisplayDvVlf + meta ExecutionDvVlf) so the display fold and analysis don't
+    /// read the stock-basis components as predictor-basis; the within-tolerance
+    /// pass re-adopts both after a load or reconcile recapture. Runs panel open or
+    /// not.</summary>
+    private static void AdvanceBasisReconversion(VesselRegistry vessels)
+    {
+        if (Environment.TickCount64 < _nextBasisUpkeepMs) return;
+        _nextBasisUpkeepMs = Environment.TickCount64 + 1000;
+        double now = Universe.GetElapsedSimTime().Seconds();
+        foreach (var (vesselId, plan) in FlightPlans.SnapshotForUpkeep())
+        {
+            // A conversion folded on a diverged predictor would be wrong; rebase
+            // owns that recovery.
+            if (plan.Meta.Count == 0 || plan.Diverged) continue;
+            Vehicle? vehicle = vessels.TryGetLiveVehicle(vesselId);
+            if (vehicle is null) continue;
+            if (!PlannedBurnConverter.ExistingBurnParentsReady(vehicle)) continue;
+            IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vehicle);
+            foreach (Burn burn in burns)
+            {
+                double t = burn.Time.Seconds();
+                if (plan.TryGetMetaAt(t) is not { } meta) continue;
+                string? resolved =
+                    PlannedBurnConverter.ExistingBurnParentId(vehicle, burn);
+                if (resolved is null) continue;
+                if (meta.BasisParentId is null)
+                    meta.BasisParentId = resolved;
+                if (!PlannerKernel.SafelyAheadForRewrite(t, now)) continue;
+                if (PlannedBurnConverter.TryAuthorDvVlfForExecution(vessels, vehicle,
+                        vehicle.Orbit, OthersExcept(burns, burn), burn, t, meta.Frame,
+                        meta.Authored, now, out var dvVlf,
+                        out var predictorDvVlf) is { } refusal)
+                {
+                    if (Environment.TickCount64 >= _nextBasisReconvertWarnMs)
+                    {
+                        _nextBasisReconvertWarnMs = Environment.TickCount64 + 5000;
+                        ModLog.Warn($"planner: execution-basis upkeep deferred for "
+                            + $"'{vesselId}' burn at t={t:F1} s: {refusal}");
+                    }
+                    continue;
+                }
+                bool flipped = !string.Equals(meta.BasisParentId, resolved,
+                    StringComparison.Ordinal);
+                if (!flipped && !BurnFrameKernel.IsStale(FrameAdapter.ToCore(dvVlf),
+                        FrameAdapter.ToCore(burn.DeltaVVlf),
+                        PlannerKernel.ExecutionRealizeToleranceMps))
+                {
+                    // Already realized within tolerance: re-adopt the session-only
+                    // bookkeeping (needed after a load or reconcile recapture).
+                    AdoptExecutionRealization(plan, meta, burn, predictorDvVlf);
+                    continue;
+                }
+                if (BurnPlanWriter.TryEditDv(vehicle, burn, dvVlf.X, dvVlf.Y, dvVlf.Z,
+                        predictorDvVlf)
+                    != "applied")
+                    continue;
+                string previous = meta.BasisParentId;
+                meta.BasisParentId = resolved;
+                meta.ExecutionDvVlf = FrameAdapter.ToCore(dvVlf);
+                InvalidateAnalysis();
+                ModLog.Info(flipped
+                    ? $"planner: burn basis parent changed '{previous}' -> '{resolved}' "
+                      + $"for '{vesselId}' at t={t:F1} s; dv re-realized in {meta.Frame.Label}"
+                    : $"planner: burn at t={t:F1} s for '{vesselId}' re-realized against "
+                      + $"the drifted stock patch basis ({meta.Frame.Label})");
+            }
+        }
+    }
+
+    /// <summary>Stamps a within-tolerance burn as execution-realized
+    /// (<see cref="FlightPlanBurnMeta.ExecutionDvVlf"/>) and refreshes the
+    /// snapshot's display vector. Both are session-only, so this also repairs them
+    /// after a load or reconcile recapture. Runs every upkeep pass: analysis is
+    /// invalidated only when the stamp materially moves.</summary>
+    private static void AdoptExecutionRealization(FlightPlanModel plan,
+        FlightPlanBurnMeta meta, Burn burn, Vector3d? predictorDvVlf)
+    {
+        Vector3d stored = FrameAdapter.ToCore(burn.DeltaVVlf);
+        if (meta.ExecutionDvVlf is not { } previous
+            || BurnFrameKernel.IsStale(previous, stored,
+                PlannedBurnConverter.StaleToleranceMps))
+        {
+            meta.ExecutionDvVlf = stored;
+            InvalidateAnalysis();
+        }
+        if (predictorDvVlf is { } display)
+            plan.SnapshotSetDisplayDv(burn.Time.Seconds(), display,
+                PlannedBurnConverter.StaleToleranceMps);
+    }
+
     private static void ClosePicker() => _pickerVesselId = null;
 
     /// <summary>THE picker-targeting predicate (one copy, or the keying convention
@@ -214,6 +317,7 @@ public static class BurnPlannerPanel
                 && vessels.TryGetLiveVehicle(pending.VesselId) is { } owner)
                 AdvanceRendezvous(vessels, owner);
             AdvanceOptimizer(vessels);
+            AdvanceBasisReconversion(vessels);
             // Keep transactions progressing while hidden; completed optimizer state
             // stays parked in its owner context until the planner is reopened.
             if (!_open)
@@ -345,14 +449,8 @@ public static class BurnPlannerPanel
         bool created = false;
         if (plan is null)
         {
-            var times = new List<double>(burns.Count + 1);
-            foreach (Burn burn in burns) times.Add(burn.Time.Seconds());
-            times.Add(burnTime);
-            plan = FlightPlans.Create(vehicle.Id, now,
-                FlightPlans.InitialLengthSeconds(now, times));
+            plan = CreatePlanAdoptingBurns(vehicle, burns, now, burnTime);
             created = true;
-            ModLog.Info($"planner: flight plan created for '{vehicle.Id}' at "
-                + $"t={now:F1} s by compiled player workflow");
         }
         else if (plan.Diverged)
         {
@@ -367,6 +465,133 @@ public static class BurnPlannerPanel
         _status = verdict;
         InvalidateAnalysis();
         return verdict;
+    }
+
+    internal static string CreatePlanForGameTest(Vehicle vehicle)
+    {
+        if (FlightPlans.TryGet(vehicle.Id) is not null)
+            return "rejected: flight plan already exists";
+        CreatePlanAdoptingBurns(vehicle, BurnPlanWriter.Snapshot(vehicle),
+            Universe.GetElapsedSimTime().Seconds());
+        _status = "plan created";
+        InvalidateAnalysis();
+        return _status;
+    }
+
+    private static FlightPlanModel CreatePlanAdoptingBurns(Vehicle vehicle,
+        IReadOnlyList<Burn> burns, double now, double? plannedBurnTime = null)
+    {
+        var times = new List<double>(burns.Count + 1);
+        foreach (Burn burn in burns) times.Add(burn.Time.Seconds());
+        if (plannedBurnTime is { } burnTime) times.Add(burnTime);
+        FlightPlanModel plan = FlightPlans.Create(vehicle.Id, now,
+            FlightPlans.InitialLengthSeconds(now, times));
+        ModLog.Info($"planner: flight plan created for '{vehicle.Id}' at "
+            + $"t={now:F1} s by compiled player workflow");
+        return plan;
+    }
+
+    internal static string DeletePlanAndBurns(Vehicle vehicle)
+    {
+        if (FlightPlans.TryGet(vehicle.Id) is null)
+            return "rejected: no flight plan";
+        IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vehicle);
+        foreach (Burn burn in burns)
+        {
+            // Surface a failed removal; the plan stays so the action can be retried.
+            string verdict = BurnPlanWriter.TryRemove(vehicle, burn);
+            if (verdict != "queued")
+            {
+                InvalidateAnalysis();
+                _status = "rejected: could not remove burn at "
+                    + $"t={burn.Time.Seconds():F1} s: {verdict}";
+                return _status;
+            }
+        }
+        FlightPlans.Remove(vehicle.Id);
+        InvalidateAnalysis();
+        _status = $"plan deleted ({burns.Count} burn(s) removed)";
+        ModLog.Info($"planner: flight plan deleted for '{vehicle.Id}' "
+            + $"({burns.Count} burns removed)");
+        return _status;
+    }
+
+    internal static string AddPlaceholderBurnForGameTest(
+        VesselRegistry vessels, Vehicle vehicle, FrameSpec frame)
+    {
+        double now = Universe.GetElapsedSimTime().Seconds();
+        IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vehicle);
+        FlightPlanModel? plan = FlightPlans.TryGet(vehicle.Id);
+        if (plan is null)
+            return "rejected: no flight plan";
+        if (plan.Diverged)
+            return "rejected: plan diverged; rebase it before adding a burn";
+        string verdict = QueueBurn(vessels, vehicle,
+            vessels.TryGetTracked(vehicle.Id), vehicle.Orbit, plan, burns, now,
+            now + AddLeadSeconds, frame, Vector3d.Zero,
+            allowVlfFallback: false);
+        _status = verdict;
+        InvalidateAnalysis();
+        return verdict;
+    }
+
+    internal static string MoveBurnForGameTest(
+        VesselRegistry vessels, Vehicle vehicle, Burn burn, double newTime)
+    {
+        FlightPlanModel? plan = FlightPlans.TryGet(vehicle.Id);
+        if (plan is null)
+            return "rejected: no flight plan";
+        TrackedVessel? tracked = vessels.TryGetTracked(vehicle.Id);
+        if (tracked is null)
+            return "rejected: vessel is not tracked";
+        double now = Universe.GetElapsedSimTime().Seconds();
+        // Same admission the panel's time editor applies before TryEditTime.
+        if (plan.RejectOutsideWindow(newTime, now,
+                AvailableRailsDays(tracked, now)) is { } outside)
+            return outside;
+        IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vehicle);
+        double oldTime = burn.Time.Seconds();
+        FlightPlanBurnMeta? meta = plan.TryGetMetaAt(oldTime);
+        string verdict = BurnPlanWriter.TryEditTime(vehicle, burn, newTime);
+        if (verdict == "applied")
+        {
+            MoveMetaAndPicker(vehicle, plan, oldTime, newTime);
+            if (meta is not null)
+            {
+                ReconvertAfterTimeEdit(vessels, vehicle, tracked, vehicle.Orbit,
+                    burns, burn, meta, newTime, now);
+                verdict = _status;
+            }
+            else
+            {
+                // A VLF-authored burn has nothing to reconvert; report the move,
+                // not stale _status.
+                verdict = "time applied";
+                _status = verdict;
+            }
+        }
+        InvalidateAnalysis();
+        return verdict;
+    }
+
+    internal static string EditBurnComponentsForGameTest(
+        VesselRegistry vessels, Vehicle vehicle, Burn burn, Vector3d components)
+    {
+        FlightPlanModel? plan = FlightPlans.TryGet(vehicle.Id);
+        if (plan is null)
+            return "rejected: no flight plan";
+        // Without the meta, EditComponents would write these as raw stock VLF and
+        // still report "applied" — a silently wrong-frame burn.
+        FlightPlanBurnMeta? meta = plan.TryGetMetaAt(burn.Time.Seconds());
+        if (meta is null)
+            return "rejected: burn has no authoring-frame meta at "
+                + $"t={burn.Time.Seconds():F1} s";
+        IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vehicle);
+        EditComponents(vessels, vehicle, vessels.TryGetTracked(vehicle.Id),
+            vehicle.Orbit, plan, burns, burn, meta, components,
+            Universe.GetElapsedSimTime().Seconds());
+        InvalidateAnalysis();
+        return _status;
     }
 
     internal static string RebasePlanForGameTest(
@@ -384,36 +609,6 @@ public static class BurnPlannerPanel
             BurnPlanWriter.Snapshot(vehicle),
             Universe.GetElapsedSimTime().Seconds());
         return _status;
-    }
-
-    internal static string RemoveCompletedBurnForGameTest(
-        VesselRegistry vessels, Vehicle vehicle)
-    {
-        if (FlightPlans.TryGet(vehicle.Id) is not { } plan)
-            return "rejected: no flight plan";
-        if (vessels.TryGetTracked(vehicle.Id) is not { } tracked)
-            return "rejected: vessel is not tracked";
-        if (!PlannerKernel.LiveDeltaVHasSettled(
-                Environment.TickCount64, tracked.LastDvWitnessMs))
-            return "waiting: live delta-v has not settled";
-
-        IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vehicle);
-        if (burns.Count == 0)
-            return "rejected: the flight plan has no stock execution node";
-        Burn burn = burns[0];
-        double now = Universe.GetElapsedSimTime().Seconds();
-        if (burn.Time.Seconds() > now)
-            return "waiting: the first burn epoch is still in the future";
-
-        double time = burn.Time.Seconds();
-        string verdict = BurnPlanWriter.TryRemove(vehicle, burn);
-        if (verdict == "queued")
-        {
-            plan.RemoveMetaAt(time);
-            if (PickerTargets(vehicle.Id, time)) ClosePicker();
-        }
-        InvalidateAnalysis();
-        return verdict;
     }
 
     /// <summary>Save bridge for the few frames between the two queued stock writes.
@@ -1066,11 +1261,7 @@ public static class BurnPlannerPanel
         }
         if (ImGui.Button("Delete plan and burns"u8, (float2?)null))
         {
-            foreach (var b in burns) BurnPlanWriter.TryRemove(vehicle, b);
-            FlightPlans.Remove(vehicle.Id);
-            InvalidateAnalysis();
-            _status = $"plan deleted ({burns.Count} burn(s) removed)";
-            ModLog.Info($"planner: flight plan deleted for '{vehicle.Id}' ({burns.Count} burns removed)");
+            DeletePlanAndBurns(vehicle);
             return;
         }
         ApplyCompletedOptimizer(vessels, vehicle, orbit, plan, burns, now);

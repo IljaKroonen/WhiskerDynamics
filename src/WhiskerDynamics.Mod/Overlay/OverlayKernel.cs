@@ -1127,7 +1127,9 @@ public static class OverlayKernel
     /// any predictor work.
     /// Conversion happens lazily inside <see cref="FoldBurns"/>, so burn i sees the
     /// pre-burn trajectory after every earlier captured burn. Both impulsive and
-    /// finite display folds use this exact seam.</summary>
+    /// finite display folds use this exact seam. The conversion reads the PREDICTOR
+    /// state, so an execution-basis burn folds its DisplayDvVlf instead — its raw
+    /// stock components would fold rotated by the conic drift.</summary>
     public static int FoldSnapshotBurns(TrajectoryPredictor display,
         IReadOnlyList<PlanSnapshotBurn> burns, IReadOnlyList<double> burnTimes,
         double t0, double horizon,
@@ -1148,7 +1150,7 @@ public static class OverlayKernel
                 // The parent callback runs first so production cancellation can abort
                 // before StateAt performs a potentially long predictor extension.
                 StateVector state = display.StateAt(burn.TimeSeconds);
-                return BurnFrameKernel.VlfToEcl(burn.DeltaVVlf,
+                return BurnFrameKernel.VlfToEcl(burn.DisplayDvVlf ?? burn.DeltaVVlf,
                     state.Position - parent.Position, state.Velocity - parent.Velocity);
             }, warn, finite, out earliestStartSeconds);
     }
