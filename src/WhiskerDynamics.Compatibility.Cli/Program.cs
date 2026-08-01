@@ -66,13 +66,14 @@ internal static class CompatibilityCli
         bool panelOk = PrintSection("Panel targets", PanelTargets.Panel);
         bool gameplayOk = PrintSection("Gameplay targets", GameplayTargets.Gameplay);
         bool enumsOk = EnumContract.Validate(out var enumMismatches);
-        PrintResult("Enum values", enumsOk, enumMismatches, 4);
+        PrintResult("Enum values", enumsOk, enumMismatches, EnumContract.CheckCount);
 
         int targetCount = PanelTargets.Panel.Length + GameplayTargets.Gameplay.Length;
         bool compatible = buildOk && panelOk && gameplayOk && enumsOk;
         Console.WriteLine();
         Console.WriteLine(compatible
-            ? $"SUPPORTED: verified build; all {targetCount} member targets and 4 enum values match."
+            ? $"SUPPORTED: verified build; all {targetCount} member targets and "
+                + $"{EnumContract.CheckCount} enum values match."
             : !buildOk && panelOk && gameplayOk && enumsOk
                 ? "UNSUPPORTED: API checks pass, but this KSA build has not been behaviorally verified."
                 : "INCOMPATIBLE: one or more game API assumptions changed.");

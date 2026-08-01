@@ -35,7 +35,7 @@ public class PatchSetTests
     public void Compatibility_catalog_shape_is_characterized()
     {
         Assert.Single(PanelTargets.Panel);
-        Assert.Equal(263, GameplayTargets.Gameplay.Length);
+        Assert.Equal(270, GameplayTargets.Gameplay.Length);
         Assert.True(EnumContract.Validate(out var mismatches));
         Assert.Empty(mismatches);
     }
@@ -65,6 +65,9 @@ public class PatchSetTests
             typeof(SoiHandoffPatch),
             typeof(SoiEncounterPlanAuthorityPatch),
             typeof(SoiEscapePlanAuthorityPatch),
+            typeof(BurnPlanCalculationScopePatch),
+            typeof(BurnPlanDeserializeScopePatch),
+            typeof(BurnImpactPreservationPatch),
             typeof(SoiRecalculateFlightPlanScopePatch),
             typeof(NavigationTargetPatch),
             typeof(SaveSidecarWritePatch),
@@ -82,7 +85,7 @@ public class PatchSetTests
             typeof(BurnClickPatch),
         ];
 
-        Assert.Equal(25, GameplayPatchSet.PatchTypes.Count);
+        Assert.Equal(28, GameplayPatchSet.PatchTypes.Count);
         Assert.Equal(expected, GameplayPatchSet.PatchTypes);
         Assert.Equal(expected.Length, expected.Distinct().Count());
         Assert.DoesNotContain(typeof(StatusPanelPatch), GameplayPatchSet.PatchTypes);

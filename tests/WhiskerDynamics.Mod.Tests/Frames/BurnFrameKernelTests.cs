@@ -155,6 +155,24 @@ public class BurnFrameKernelTests
     }
 
     [Fact]
+    public void Execution_realized_analysis_is_never_stale_against_the_predictor_realization()
+    {
+        var meta = new FlightPlanBurnMeta
+        {
+            TimeSeconds = 5000,
+            Frame = new FrameSpec(FrameKind.Inertial, "Earth", null),
+            Authored = new Vector3d(10, 0, 0),
+            StampMs = 0,
+        };
+        var stored = new Vector3d(9, 4, 1); // stock-basis realization
+        var fresh = new Vector3d(10, 0, 0); // predictor-basis realization
+        var drifted = new PlannedBurnConverter.BurnAnalysis(
+            5000, stored, meta, meta.Authored, fresh, null);
+        Assert.True(drifted.Stale);
+        Assert.False((drifted with { ExecutionRealized = true }).Stale);
+    }
+
+    [Fact]
     public void Staleness_is_the_vlf_difference_magnitude_against_the_tolerance()
     {
         var current = new Vector3d(10, 0, 0);

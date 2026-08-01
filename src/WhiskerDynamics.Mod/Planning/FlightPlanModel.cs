@@ -18,13 +18,29 @@ public sealed class FlightPlanBurnMeta
     /// appeared yet (adds are QUEUED via InputEvents and land next frame) must survive
     /// the orphan prune for a grace window instead of dying before its burn exists.</summary>
     public required long StampMs { get; set; }
+
+    /// <summary>Stock patch parent the burn's current DeltaVVlf was converted
+    /// against — the SOI-flip detector for the planner's automatic reconversion.
+    /// Null = not yet resolved; the upkeep pass adopts the current resolution
+    /// without rewriting. Session-only: dv and basis are consistent at save time.</summary>
+    public string? BasisParentId { get; set; }
+
+    /// <summary>Stock components as last written/verified by the execution-basis
+    /// upkeep. While the live components still match, analysis must not read them in
+    /// the predictor basis or flag the basis drift stale — the upkeep owns them. Any
+    /// other write breaks the match. Session-only, like <see cref="BasisParentId"/>.</summary>
+    public Vector3d? ExecutionDvVlf { get; set; }
 }
 
 /// <summary>One captured burn of a plan snapshot: the stock burn's time key, VLF
 /// delta-v, and burn-time patch parent defining that VLF basis. The parent is nullable
-/// while its patch cannot be resolved. Immutable; KSA-free.</summary>
+/// while its patch cannot be resolved. DisplayDvVlf is the predictor-basis
+/// realization for an execution-basis write (the display fold reads VLF in the
+/// predictor basis, so the raw stock components would fold rotated); null = the
+/// stock components are predictor-basis already. Immutable; KSA-free.</summary>
 public sealed record PlanSnapshotBurn(
-    double TimeSeconds, Vector3d DeltaVVlf, string? BasisParentId = null);
+    double TimeSeconds, Vector3d DeltaVVlf, string? BasisParentId = null,
+    Vector3d? DisplayDvVlf = null);
 
 /// <summary>Immutable anchor and burn list for the planned display path. The stock
 /// `BurnPlan` remains the execution source of truth. Whole-reference replacement
@@ -255,6 +271,7 @@ public sealed class FlightPlanModel
             && BurnIdentityPolicy.SameBurn(m.TimeSeconds, newTimeSeconds));
         meta.TimeSeconds = newTimeSeconds;
         meta.StampMs = nowMs; // fresh grace: the edited burn re-lands like an add
+        meta.BasisParentId = null; // basis is time-dependent: re-resolve at the new slot
     }
 
     /// <summary>Drops metas whose stock burn is gone (deleted or time-dragged via the
@@ -465,10 +482,13 @@ public sealed class FlightPlanModel
     /// <summary>Writer-mirror (BurnPlanWriter calls these on every successful stock
     /// mutation — ONE seam, so no edit affordance can forget the mirror): add or
     /// replace the captured burn at its time slot. No-op before the first capture
-    /// (the on-rails reconcile captures wholesale).</summary>
+    /// (the on-rails reconcile captures wholesale). The default null
+    /// <paramref name="displayDvVlf"/> deliberately CLEARS any prior display vector —
+    /// an ordinary write's components are predictor-basis themselves.</summary>
     public void SnapshotSetBurn(double timeSeconds, Vector3d dvVlf,
         string? basisParentId = null,
-        bool markDownstreamParentsPending = false)
+        bool markDownstreamParentsPending = false,
+        Vector3d? displayDvVlf = null)
     {
         lock (_snapshotGate)
         {
@@ -483,7 +503,7 @@ public sealed class FlightPlanModel
                 : basisParentId ?? matched?.BasisParentId;
             var burns = snapshot.Burns
                 .Where(b => BurnIdentityPolicy.DifferentBurn(b.TimeSeconds, timeSeconds))
-                .Append(new PlanSnapshotBurn(timeSeconds, dvVlf, parent))
+                .Append(new PlanSnapshotBurn(timeSeconds, dvVlf, parent, displayDvVlf))
                 .ToArray();
             if (markDownstreamParentsPending)
                 MarkParentRefreshAfter(timeSeconds, burns);
@@ -541,6 +561,54 @@ public sealed class FlightPlanModel
                     snapshot.PropulsionSource));
         }
         BumpVersion();
+    }
+
+    /// <summary>Upkeep seam: refresh the captured burn's
+    /// <see cref="PlanSnapshotBurn.DisplayDvVlf"/> without touching the stock
+    /// components (repairs after load or reconcile recapture). No-op — and no
+    /// version churn; this runs every upkeep pass — within
+    /// <paramref name="toleranceMps"/> or when no captured burn matches.</summary>
+    public void SnapshotSetDisplayDv(double timeSeconds, Vector3d displayDvVlf,
+        double toleranceMps)
+    {
+        lock (_snapshotGate)
+        {
+            if (_snapshot is not { } snapshot) return;
+            var matched = snapshot.Burns.FirstOrDefault(
+                b => BurnIdentityPolicy.SameBurn(b.TimeSeconds, timeSeconds));
+            if (matched is null) return;
+            if (!BurnFrameKernel.IsStale(
+                    matched.DisplayDvVlf ?? matched.DeltaVVlf, displayDvVlf, toleranceMps))
+                return;
+            var burns = snapshot.Burns.Select(b => ReferenceEquals(b, matched)
+                ? matched with { DisplayDvVlf = displayDvVlf }
+                : b);
+            System.Threading.Volatile.Write(ref _snapshot,
+                PlanSnapshot.Capture(snapshot.EpochSeconds, snapshot.State,
+                    snapshot.AnchorParentId, burns, snapshot.Engine,
+                    snapshot.PropulsionSource));
+        }
+        BumpVersion();
+    }
+
+    /// <summary>The captured burn's display vector, guarded by the live stock
+    /// components: null when no burn matches, none is recorded, or
+    /// <paramref name="currentDvVlf"/> drifted from the capture (a stock-side edit
+    /// the mirror never saw — the vector describes the OLD components).</summary>
+    internal Vector3d? SnapshotDisplayDvFor(double timeSeconds, Vector3d currentDvVlf)
+    {
+        lock (_snapshotGate)
+        {
+            var matched = _snapshot?.Burns.FirstOrDefault(
+                b => BurnIdentityPolicy.SameBurn(b.TimeSeconds, timeSeconds));
+            if (matched?.DisplayDvVlf is not { } display) return null;
+            var delta = matched.DeltaVVlf - currentDvVlf;
+            return Math.Abs(delta.X) <= DvMatchTolerance
+                && Math.Abs(delta.Y) <= DvMatchTolerance
+                && Math.Abs(delta.Z) <= DvMatchTolerance
+                ? display
+                : null;
+        }
     }
 
     /// <summary>Writer-mirror: drop the captured burn at the time slot.</summary>
@@ -713,6 +781,12 @@ public static class FlightPlans
     public static FlightPlanModel? TryGet(string vesselId)
     {
         lock (Gate) return Plans.TryGetValue(vesselId, out var plan) ? plan : null;
+    }
+
+    /// <summary>Point-in-time (vessel id, plan) list; the plans stay live references.</summary>
+    internal static List<KeyValuePair<string, FlightPlanModel>> SnapshotForUpkeep()
+    {
+        lock (Gate) return [.. Plans];
     }
 
     public static FlightPlanModel Create(string vesselId, double nowSeconds,

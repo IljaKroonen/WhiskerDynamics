@@ -53,7 +53,6 @@ public class SpaceDockBundleScriptTests
             foreach (string argument in new[]
             {
                 "run",
-                "--disable-build-servers",
                 "--file",
                 Path.Combine(repoRoot, "scripts", "create-spacedock-bundle.cs"),
                 "--",

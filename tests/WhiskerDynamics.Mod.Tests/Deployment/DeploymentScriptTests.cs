@@ -560,6 +560,210 @@ public class DeploymentScriptTests
         }
     }
 
+    [Fact]
+    public void Game_test_driver_manifest_update_enables_an_existing_disabled_entry()
+    {
+        // "\n" escapes, not a raw literal: raw literals inherit the checkout's
+        // line-ending style, and the assertions below pin "\n".
+        char quote = (char)34;
+        string manifest =
+            $"[[mods]]\nid = {quote}WhiskerDynamics{quote}\nenabled = false\n\n"
+            + $"[[mods]]\nid = {quote}WhiskerDynamics.GameTestDriver{quote}\n"
+            + "enabled = false # disabled after a prior game test";
+        var repoRoot = FindRepoRoot();
+        var root = NewRoot();
+        var manifestPath = Path.Combine(root, "manifest.toml");
+
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(manifestPath, manifest);
+
+            var result = Run(CreateGameTestDriverManifestUpdateProbe(
+                ScriptPath(repoRoot), manifestPath, repoRoot));
+            string updated = File.ReadAllText(manifestPath);
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Contains("enabled game test driver", result.StandardOutput);
+            Assert.Contains(
+                $"id = {quote}WhiskerDynamics{quote}\nenabled = false", updated);
+            Assert.Contains(
+                $"id = {quote}WhiskerDynamics.GameTestDriver{quote}\n"
+                + "enabled = true # disabled after a prior game test",
+                updated);
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    [Fact]
+    public void Game_test_driver_deploy_gate_rejects_a_bad_main_entry_without_touching_the_manifest()
+    {
+        char quote = (char)34;
+        (string Manifest, string ExpectedError)[] cases =
+        [
+            // Missing main entry: only the driver's own (disabled) entry exists.
+            ($"[[mods]]\nid = {quote}WhiskerDynamics.GameTestDriver{quote}\nenabled = false\n",
+                "deploy the main mod first"),
+            ($"[[mods]]\nid = {quote}WhiskerDynamics{quote}\nenabled = false\n",
+                "is disabled in manifest.toml"),
+            ($"[[mods]]\nid = {quote}WhiskerDynamics{quote}\nenabled = 1\n",
+                "cannot parse"),
+        ];
+        var repoRoot = FindRepoRoot();
+        var root = NewRoot();
+        var manifestPath = Path.Combine(root, "manifest.toml");
+
+        try
+        {
+            Directory.CreateDirectory(root);
+            foreach (var (manifest, expectedError) in cases)
+            {
+                byte[] original = Encoding.UTF8.GetBytes(manifest);
+                File.WriteAllBytes(manifestPath, original);
+
+                var result = Run(CreateGameTestDriverManifestGateProbe(
+                    ScriptPath(repoRoot), manifestPath, repoRoot));
+
+                Assert.Equal(1, result.ExitCode);
+                Assert.Contains(expectedError, result.StandardError);
+                Assert.Equal(original, File.ReadAllBytes(manifestPath));
+            }
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    [Fact]
+    public void Game_test_driver_deploy_gate_never_creates_a_missing_manifest()
+    {
+        var repoRoot = FindRepoRoot();
+        var root = NewRoot();
+        var manifestPath = Path.Combine(root, "manifest.toml");
+
+        try
+        {
+            Directory.CreateDirectory(root);
+            var result = Run(CreateGameTestDriverManifestGateProbe(
+                ScriptPath(repoRoot), manifestPath, repoRoot));
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("deploy the main mod first", result.StandardError);
+            Assert.False(File.Exists(manifestPath));
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    [Fact]
+    public void Game_test_driver_deploy_gate_enables_the_driver_once_the_main_entry_is_active()
+    {
+        char quote = (char)34;
+        string manifest =
+            $"[[mods]]\nid = {quote}WhiskerDynamics{quote}\nenabled = true\n\n"
+            + $"[[mods]]\nid = {quote}WhiskerDynamics.GameTestDriver{quote}\nenabled = false\n";
+        var repoRoot = FindRepoRoot();
+        var root = NewRoot();
+        var manifestPath = Path.Combine(root, "manifest.toml");
+
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(manifestPath, manifest);
+
+            var result = Run(CreateGameTestDriverManifestGateProbe(
+                ScriptPath(repoRoot), manifestPath, repoRoot));
+            string updated = File.ReadAllText(manifestPath);
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Contains("enabled game test driver", result.StandardOutput);
+            Assert.Contains(
+                $"id = {quote}WhiskerDynamics.GameTestDriver{quote}\nenabled = true",
+                updated);
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    [Fact]
+    public void Game_test_driver_manifest_update_never_duplicates_an_unparseable_enabled_key()
+    {
+        char quote = (char)34;
+        string[] manifests =
+        [
+            $"[[mods]]\nid = {quote}WhiskerDynamics.GameTestDriver{quote}\n"
+            + $"enabled = {quote}false{quote}\n",
+            $"[[mods]]\nid = {quote}WhiskerDynamics.GameTestDriver{quote}\nenabled = 1\n",
+            $"[[mods]]\nid = {quote}WhiskerDynamics.GameTestDriver{quote}\n"
+            + "enabled.stale = true\n",
+        ];
+        var repoRoot = FindRepoRoot();
+        var root = NewRoot();
+        var manifestPath = Path.Combine(root, "manifest.toml");
+
+        try
+        {
+            Directory.CreateDirectory(root);
+            foreach (string manifest in manifests)
+            {
+                byte[] original = Encoding.UTF8.GetBytes(manifest);
+                File.WriteAllBytes(manifestPath, original);
+
+                var result = Run(CreateGameTestDriverManifestUpdateProbe(
+                    ScriptPath(repoRoot), manifestPath, repoRoot));
+
+                Assert.Equal(1, result.ExitCode);
+                Assert.Contains("cannot parse", result.StandardError);
+                Assert.Equal(original, File.ReadAllBytes(manifestPath));
+            }
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    [Fact]
+    public void Disabled_manifest_probe_flags_only_an_explicitly_disabled_entry()
+    {
+        var quote = (char)34;
+        var cases = new[]
+        {
+            ($"[[mods]]\nid = {quote}WhiskerDynamics{quote}\nenabled = false", 0),
+            ($"enabled = false\n[[mods]]\nid = {quote}WhiskerDynamics{quote}", 1),
+            ($"[[mods]]\nid = {quote}WhiskerDynamics{quote}\nenabled = true", 1),
+            ($"[[mods]]\nid = {quote}WhiskerDynamics{quote}", 1),
+            ($"[[mods]]\nid = {quote}Other{quote}\nenabled = false", 1),
+        };
+        var repoRoot = FindRepoRoot();
+        var root = NewRoot();
+        var manifestPath = Path.Combine(root, "manifest.toml");
+
+        try
+        {
+            Directory.CreateDirectory(root);
+            foreach (var (manifest, expectedExitCode) in cases)
+            {
+                File.WriteAllText(manifestPath, manifest);
+                var result = Run(CreateDisabledManifestProbe(
+                    ScriptPath(repoRoot), manifestPath, repoRoot));
+                Assert.Equal(expectedExitCode, result.ExitCode);
+            }
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
     private static ProcessStartInfo CreateDeploymentProbe(
         string scriptPath,
         string outputDirectory,
@@ -615,11 +819,38 @@ public class DeploymentScriptTests
         return info;
     }
 
+    private static ProcessStartInfo CreateDisabledManifestProbe(
+        string scriptPath, string manifestPath, string repoRoot)
+    {
+        var info = CreateScriptProcess(scriptPath, repoRoot);
+        info.ArgumentList.Add("--check-manifest-disabled");
+        info.ArgumentList.Add(manifestPath);
+        return info;
+    }
+
     private static ProcessStartInfo CreateManifestUpdateProbe(
         string scriptPath, string manifestPath, string repoRoot)
     {
         var info = CreateScriptProcess(scriptPath, repoRoot);
         info.ArgumentList.Add("--check-manifest-update");
+        info.ArgumentList.Add(manifestPath);
+        return info;
+    }
+
+    private static ProcessStartInfo CreateGameTestDriverManifestUpdateProbe(
+        string scriptPath, string manifestPath, string repoRoot)
+    {
+        var info = CreateScriptProcess(scriptPath, repoRoot);
+        info.ArgumentList.Add("--check-game-test-driver-manifest-update");
+        info.ArgumentList.Add(manifestPath);
+        return info;
+    }
+
+    private static ProcessStartInfo CreateGameTestDriverManifestGateProbe(
+        string scriptPath, string manifestPath, string repoRoot)
+    {
+        var info = CreateScriptProcess(scriptPath, repoRoot);
+        info.ArgumentList.Add("--check-game-test-driver-manifest-gate");
         info.ArgumentList.Add(manifestPath);
         return info;
     }

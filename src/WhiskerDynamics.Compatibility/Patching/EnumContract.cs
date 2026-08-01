@@ -4,13 +4,21 @@ namespace WhiskerDynamics.Compatibility.Patching;
 /// contract even though reflection-based member validation cannot see their drift.</summary>
 internal static class EnumContract
 {
+    private static readonly Action<List<string>>[] Checks =
+    [
+        m => Check<KSA.Situation, byte>(nameof(KSA.Situation.Freefall), 1, m),
+        m => Check<KSA.CameraMode, int>(nameof(KSA.CameraMode.Map), 2, m),
+        m => Check<KSA.PatchTransition, int>(nameof(KSA.PatchTransition.Final), 1, m),
+        m => Check<KSA.PatchTransition, int>(nameof(KSA.PatchTransition.Impact), 5, m),
+        m => Check<KSA.ThrusterMapFlags, int>(nameof(KSA.ThrusterMapFlags.TranslateForward), 0x80, m),
+    ];
+
+    public static int CheckCount => Checks.Length;
+
     public static bool Validate(out List<string> mismatches)
     {
         mismatches = [];
-        Check<KSA.Situation, byte>(nameof(KSA.Situation.Freefall), 1, mismatches);
-        Check<KSA.CameraMode, int>(nameof(KSA.CameraMode.Map), 2, mismatches);
-        Check<KSA.PatchTransition, int>(nameof(KSA.PatchTransition.Final), 1, mismatches);
-        Check<KSA.ThrusterMapFlags, int>(nameof(KSA.ThrusterMapFlags.TranslateForward), 0x80, mismatches);
+        foreach (var check in Checks) check(mismatches);
         return mismatches.Count == 0;
     }
 

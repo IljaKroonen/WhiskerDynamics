@@ -150,47 +150,6 @@ internal sealed class GameTestPlayerLunarTransferSolveJob
     }
 }
 
-internal sealed class GameTestLunarPeriluneProbeJob
-{
-    public required RailsService.PredictionContext Prediction { get; init; }
-    public required StateVector SeedState { get; init; }
-    public required double StartTime { get; init; }
-    public required double EndTime { get; init; }
-    public required double LunaRadiusMeters { get; init; }
-
-    private volatile bool _done;
-    public bool Done => _done;
-    public double? PeriluneRadiusMeters { get; private set; }
-    public string? Failure { get; private set; }
-
-    public void Start() => new Thread(Run)
-    {
-        IsBackground = true,
-        Name = "whiskerdynamics-game-test-lunar-perilune-probe",
-        Priority = ThreadPriority.BelowNormal,
-    }.Start();
-
-    private void Run()
-    {
-        try
-        {
-            var solver = new SolverPrediction(Prediction, static () => false);
-            var predictor = new TrajectoryPredictor(solver.Gravity,
-                SeedState, StartTime,
-                new IntegratorOptions { RelTol = 1e-10 });
-            PeriluneRadiusMeters =
-                GameTestPlayerLunarTransferSolveJob.FindPeriluneRadius(
-                    solver, predictor, StartTime, EndTime, LunaRadiusMeters);
-        }
-        catch (Exception e)
-        {
-            Failure = $"lunar perilune probe failed: {e.Message}";
-            ModLog.Warn($"game test: lunar perilune probe contained: {e}");
-        }
-        finally { _done = true; }
-    }
-}
-
 internal readonly record struct GameTestPlayerLunarCorrectionSolution(
     double BurnTime, Vector3d DeltaVVlf, double PeriluneRadiusMeters);
 
@@ -397,25 +356,14 @@ internal sealed class GameTestPlayerLunarCircularizationSolveJob
             distanceTolerance: 1);
         var (position, velocity) = solver.RelativeState(
             predictor, "Luna", burnTime, 6 * 3600);
-        Vector3d radial = position / position.Length();
-        Vector3d normal = position.Cross(velocity).Normalized();
-        Vector3d tangential = normal.Cross(radial).Normalized();
-        if (tangential.Dot(velocity) < 0)
-            tangential = -tangential;
         double circularSpeed = Math.Sqrt(LunaMu / position.Length());
-        Vector3d targetVelocity = tangential * circularSpeed;
-        Vector3d deltaVEcl = targetVelocity - velocity;
-        Vector3d deltaVPrn = BurnFrameKernel.FrameToFrenet(
-                deltaVEcl, position, velocity)
-            ?? throw new InvalidOperationException(
-                "Luna-frame circularization basis is degenerate");
-        double magnitude = deltaVPrn.Length();
-        if (!(magnitude > 1 && magnitude <= 2_000)
-            || !(deltaVPrn.X < 0))
+        double retrogradeDeltaV = velocity.Length() - circularSpeed;
+        if (!(retrogradeDeltaV > 1 && retrogradeDeltaV <= 2_000))
             throw new InvalidOperationException(
-                $"circularization is not a practical retrograde burn: "
-                + $"({deltaVPrn.X:R}, {deltaVPrn.Y:R}, "
-                + $"{deltaVPrn.Z:R}) m/s");
+                $"circularization is not a practical pure retrograde burn: "
+                + $"speed={velocity.Length():R} m/s, "
+                + $"circular speed={circularSpeed:R} m/s");
+        var deltaVPrn = new Vector3d(-retrogradeDeltaV, 0, 0);
         Result = new GameTestPlayerLunarCircularizationSolution(
             burnTime, deltaVPrn, periluneRadius);
     }

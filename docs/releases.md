@@ -17,7 +17,7 @@ be clean, pushed, and tracking its upstream. From the repository root, run:
 
 ```powershell
 dotnet run --file .\scripts\publish-github-release.cs `
-  --disable-build-servers -- 0.1.0
+  -- 0.1.0
 ```
 
 The command:
@@ -33,11 +33,11 @@ automatically marked as GitHub pre-releases. Useful options are:
 ```powershell
 # Create a draft for review instead of publishing immediately.
 dotnet run --file .\scripts\publish-github-release.cs `
-  --disable-build-servers -- 0.1.0 --draft
+  -- 0.1.0 --draft
 
 # Skip tests only if this exact commit already passed the Release suite.
 dotnet run --file .\scripts\publish-github-release.cs `
-  --disable-build-servers -- 0.1.0 --skip-tests
+  -- 0.1.0 --skip-tests
 ```
 
 If a network operation fails after the tag is pushed, rerun the same command.

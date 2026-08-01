@@ -157,11 +157,33 @@ internal static class GameplayTargets
             MemberKind.Property, null, typeof(List<IOrbiter>), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("IOrbiter.Parent", typeof(IOrbiter), "Parent",
             MemberKind.Property, null, typeof(IParentBody), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
-        // SOI plan authority: retain stock impact search but suppress its
-        // conic-vs-Kepler encounter/escape patch creation for predictor-owned vessels.
+        // SOI plan authority: suppress conic encounter and escape forecasts for
+        // predictor-owned vessels. Stock impacts still wake full physics.
         new("PatchedConic.CheckUpdateEncounter", typeof(PatchedConic), "CheckUpdateEncounter",
             MemberKind.Method,
             [typeof(IOrbiter), typeof(SimTime).MakeByRefType(), typeof(double)], typeof(bool)),
+        // Burn-past-impact preservation: everything BurnImpactPreservationPatch
+        // consumes — both scoped entry points, the plan-id-to-vehicle lookup, the
+        // copy constructor, and the EndTime field the extension writes.
+        new("BurnPlan.CalculateNewFlightPlansFromFlightComputerOnly", typeof(BurnPlan),
+            "CalculateNewFlightPlansFromFlightComputerOnly", MemberKind.Method,
+            [typeof(FlightComputer), typeof(FlightPlan), typeof(KeyHash),
+             typeof(List<FlightPlan>)], typeof(void)),
+        new("BurnPlan.DeserializeSave", typeof(BurnPlan), "DeserializeSave",
+            MemberKind.Method, [typeof(BurnPlanData), typeof(Vehicle)], typeof(void)),
+        new("FlightPlan.IdHash", typeof(FlightPlan), "IdHash",
+            MemberKind.Property, null, typeof(KeyHash), IsStatic: false,
+            RequiredAccessors: PropertyAccessors.Getter),
+        new("CelestialSystem.All", typeof(CelestialSystem), "All",
+            MemberKind.Property, null, typeof(LookupCollection<Astronomical>),
+            IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
+        new("LookupCollection<Astronomical>.Get(KeyHash)",
+            typeof(LookupCollection<Astronomical>), "Get",
+            MemberKind.Method, [typeof(KeyHash)], typeof(Astronomical)),
+        new("PatchedConic..ctor(copy)", typeof(PatchedConic), ".ctor",
+            MemberKind.Constructor, [typeof(PatchedConic)]),
+        new("PatchedConic.EndTime", typeof(PatchedConic), "EndTime",
+            MemberKind.Field, null, typeof(SimTime), IsStatic: false),
         new("Vehicle.UpdateTask", typeof(Vehicle), "UpdateTask",
             MemberKind.Field, null, typeof(VehicleUpdateTask), IsStatic: false),
         new("VehicleUpdateTask.NumVehicles", typeof(VehicleUpdateTask), "NumVehicles",

@@ -52,9 +52,15 @@ internal sealed class GameTestHost(GameTestHostServices services)
                     [
                         "publish",
                         "-c", "Release",
+                        "src/WhiskerDynamics.Mod/WhiskerDynamics.Mod.csproj",
+                    ],
+                    repoRoot);
+                await services.Commands.RunAsync(
+                    "dotnet",
+                    [
+                        "publish",
+                        "-c", "Release",
                         "tests/WhiskerDynamics.GameTestDriver/WhiskerDynamics.GameTestDriver.csproj",
-                        "--disable-build-servers",
-                        "-m:1",
                     ],
                     repoRoot);
                 await services.Commands.RunAsync(

@@ -103,6 +103,76 @@ public class PlanSnapshotTests
     }
 
     [Fact]
+    public void SnapshotSetBurn_records_and_an_ordinary_write_clears_the_display_vector()
+    {
+        var plan = NewPlan();
+        plan.SetSnapshot(Snap(1000, (5000.0, Dv(1))));
+        plan.SnapshotSetBurn(5000.0, Dv(2), "Earth",
+            displayDvVlf: new Vector3d(2, 1, 0));
+        Assert.Equal(new Vector3d(2, 1, 0),
+            Assert.Single(plan.Snapshot!.Burns).DisplayDvVlf);
+        plan.SnapshotSetBurn(5000.0, Dv(3), "Earth");
+        Assert.Null(Assert.Single(plan.Snapshot!.Burns).DisplayDvVlf);
+    }
+
+    [Fact]
+    public void SnapshotSetDisplayDv_refreshes_only_a_material_change_and_never_churns_the_version()
+    {
+        var plan = NewPlan();
+        plan.SnapshotSetDisplayDv(5000.0, Dv(1), 0.01); // no snapshot yet: no-op, not a crash
+        plan.SetSnapshot(Snap(1000, (5000.0, Dv(1))));
+        long installed = plan.Version;
+
+        // Within tolerance of the stock components: no churn.
+        plan.SnapshotSetDisplayDv(5000.0, new Vector3d(1, 0.005, 0), 0.01);
+        Assert.Null(Assert.Single(plan.Snapshot!.Burns).DisplayDvVlf);
+        Assert.Equal(installed, plan.Version);
+
+        plan.SnapshotSetDisplayDv(5000.0, new Vector3d(1, 5, 0), 0.01);
+        Assert.Equal(new Vector3d(1, 5, 0),
+            Assert.Single(plan.Snapshot!.Burns).DisplayDvVlf);
+        Assert.True(plan.Version > installed);
+        long refreshed = plan.Version;
+
+        // Steady state now compares against the recorded vector.
+        plan.SnapshotSetDisplayDv(5000.0, new Vector3d(1, 5, 0.005), 0.01);
+        Assert.Equal(new Vector3d(1, 5, 0),
+            Assert.Single(plan.Snapshot!.Burns).DisplayDvVlf);
+        Assert.Equal(refreshed, plan.Version);
+
+        plan.SnapshotSetDisplayDv(9999.0, Dv(9), 0.01); // no burn at the slot: no-op
+        Assert.Equal(refreshed, plan.Version);
+    }
+
+    [Fact]
+    public void SnapshotDisplayDvFor_is_guarded_by_the_live_stock_components()
+    {
+        var plan = NewPlan();
+        Assert.Null(plan.SnapshotDisplayDvFor(5000.0, Dv(1))); // no snapshot yet
+        plan.SetSnapshot(Snap(1000, (5000.0, Dv(1))));
+        Assert.Null(plan.SnapshotDisplayDvFor(5000.0, Dv(1))); // none recorded
+        plan.SnapshotSetBurn(5000.0, Dv(1), "Earth",
+            displayDvVlf: new Vector3d(0.5, 0.8, 0));
+        Assert.Equal(new Vector3d(0.5, 0.8, 0),
+            plan.SnapshotDisplayDvFor(5000.0, Dv(1)));
+        Assert.Null(plan.SnapshotDisplayDvFor(5000.0, Dv(2))); // stock-side edit: guard drops it
+        Assert.Null(plan.SnapshotDisplayDvFor(7000.0, Dv(1))); // no burn at the slot
+    }
+
+    [Fact]
+    public void Snapshot_move_drops_the_display_vector_with_its_time_slot()
+    {
+        var plan = NewPlan();
+        plan.SetSnapshot(Snap(1000, (5000.0, Dv(1))));
+        plan.SnapshotSetBurn(5000.0, Dv(1), "Earth",
+            displayDvVlf: new Vector3d(0.9, 0.4, 0));
+        plan.SnapshotMoveBurn(5000.0, 6000.0);
+        var moved = Assert.Single(plan.Snapshot!.Burns);
+        Assert.Equal(6000.0, moved.TimeSeconds);
+        Assert.Null(moved.DisplayDvVlf); // the realization is time-dependent
+    }
+
+    [Fact]
     public void SnapshotMoveBurn_rekeys_keeps_dv_and_evicts_the_target_slot()
     {
         var plan = NewPlan();

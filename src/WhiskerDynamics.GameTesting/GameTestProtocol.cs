@@ -31,6 +31,8 @@ public sealed class GameTestStep
     public string? Vessel { get; set; }
     public string? Expected { get; set; }
     public int? OrbitOffset { get; set; }
+    public int? StageCount { get; set; }
+    public bool? LunarCircularization { get; set; }
     public double? TimeoutSeconds { get; set; }
     public double? DurationSeconds { get; set; }
     public double? OffsetSeconds { get; set; }
@@ -39,7 +41,7 @@ public sealed class GameTestStep
     public double? TargetRadiusMeters { get; set; }
     public double? MinPeriluneAltitudeMeters { get; set; }
     public double? MaxPeriluneAltitudeMeters { get; set; }
-    public double? MinEccentricity { get; set; }
+    public double? MaxEccentricity { get; set; }
 }
 
 public sealed class GameTestResult
@@ -91,6 +93,15 @@ public sealed class GameScenarioBuilder
     public GameScenarioBuilder WaitUntilReady(double? timeoutSeconds = null) =>
         Add(new GameTestStep { Action = "wait-ready", TimeoutSeconds = timeoutSeconds });
 
+    public GameScenarioBuilder AutoStage(int count = 1,
+        string? vessel = null, double? timeoutSeconds = null) => Add(new GameTestStep
+        {
+            Action = "auto-stage",
+            Vessel = vessel,
+            StageCount = count,
+            TimeoutSeconds = timeoutSeconds,
+        });
+
     public GameScenarioBuilder PlanAndExecuteLunarTransfer(double offsetSeconds,
         double flightDurationSeconds, double targetPeriluneAltitudeMeters,
         string? vessel = null, double? timeoutSeconds = null,
@@ -107,40 +118,38 @@ public sealed class GameScenarioBuilder
             OrbitOffset = departureOrbitOffset,
         });
 
-    public GameScenarioBuilder AssertPeriluneAltitudeMetersBetween(
-        double minimumMeters, double maximumMeters,
-        string? vessel = null, double? timeoutSeconds = null) => Add(new GameTestStep
-        {
-            Action = "assert-perilune-altitude-between",
-            Vessel = vessel,
-            MinPeriluneAltitudeMeters = minimumMeters,
-            MaxPeriluneAltitudeMeters = maximumMeters,
-            TimeoutSeconds = timeoutSeconds,
-        });
-
     public GameScenarioBuilder PlanLunarCircularizationFromEarthSoi(
+        double minimumPeriluneAltitudeMeters,
+        double maximumPeriluneAltitudeMeters,
         string? vessel = null, double? timeoutSeconds = null) => Add(new GameTestStep
         {
             Action = "plan-lunar-circularization-from-earth-soi",
             Vessel = vessel,
+            MinPeriluneAltitudeMeters = minimumPeriluneAltitudeMeters,
+            MaxPeriluneAltitudeMeters = maximumPeriluneAltitudeMeters,
             TimeoutSeconds = timeoutSeconds,
         });
 
-    public GameScenarioBuilder AssertBadLunarCircularization(
-        double minimumEccentricity = 0.05,
-        string? vessel = null) => Add(new GameTestStep
+    public GameScenarioBuilder CompleteLunarOrbit(
+        double maximumEccentricity = 0.25,
+        string? vessel = null, double? timeoutSeconds = null) => Add(new GameTestStep
         {
-            Action = "assert-bad-lunar-circularization",
+            Action = "complete-lunar-orbit",
             Vessel = vessel,
-            MinEccentricity = minimumEccentricity,
+            MaxEccentricity = maximumEccentricity,
+            TimeoutSeconds = timeoutSeconds,
         });
 
+    /// <summary>lunarCircularization: leave the simulation speed alone through the
+    /// cutoff and keep the plan for the following CompleteLunarOrbit step.</summary>
     public GameScenarioBuilder ExecuteBurns(string? vessel = null,
-        double? timeoutSeconds = null) => Add(new GameTestStep
+        double? timeoutSeconds = null, bool lunarCircularization = false) =>
+        Add(new GameTestStep
         {
             Action = "execute-burns",
             Vessel = vessel,
             TimeoutSeconds = timeoutSeconds,
+            LunarCircularization = lunarCircularization ? true : null,
         });
 
     public GameScenarioBuilder AssertParent(string expected, string? vessel = null) =>

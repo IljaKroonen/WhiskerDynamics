@@ -11,9 +11,10 @@ public static class SoiPlanAuthorityKernel
         FatalVehicleIdentity,
     }
 
-    /// <summary>Stock conics may mirror live-physics truth, but they never schedule
-    /// transitions for a modeled Freefall vessel. First-seen and clustered vessels
-    /// need no predictor token to suppress encounter/escape generation.</summary>
+    /// <summary>Stock conics may mirror live-physics truth, but they do not schedule
+    /// parent changes for a modeled Freefall vessel. First-seen and clustered vessels
+    /// need no predictor token to suppress encounter and escape forecasts. Stock
+    /// impact forecasts remain active to start full physics before contact.</summary>
     public static Disposition Classify(
         bool enabled,
         bool bindingAvailable,

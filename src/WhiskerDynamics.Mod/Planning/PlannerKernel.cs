@@ -88,6 +88,21 @@ public static class PlannerKernel
         && double.IsFinite(vesselAvailable) && vesselAvailable >= 0
         && planTotal > vesselAvailable;
 
+    /// <summary>Minimum lead for automatic execution-basis rewrites: Auto ignition
+    /// begins half a burn duration BEFORE the node, so a closer rewrite could land
+    /// mid-thrust and shift the target under the accumulated delta-v.</summary>
+    public const double BasisReconvertLeadSeconds = 60.0;
+
+    /// <summary>Rewrite threshold for the execution-basis upkeep: 0.5 m/s bounds the
+    /// direction error of a ~1 km/s burn to ~0.03 deg while keeping steady-state
+    /// writes silent.</summary>
+    public const double ExecutionRealizeToleranceMps = 0.5;
+
+    /// <summary>Lead gate for any automatic rewrite of a burn's stored components.</summary>
+    public static bool SafelyAheadForRewrite(double burnTimeSeconds, double nowSeconds) =>
+        double.IsFinite(burnTimeSeconds)
+        && burnTimeSeconds > nowSeconds + BasisReconvertLeadSeconds;
+
     /// <summary>The parent whose VLF basis a burn EXECUTES in (decompiled
     /// evidence): stock resolves the burn's PATCH at the burn time —
     /// BurnPlan.TryGetValidTimeLinePatch / FlightPlan.TryFindPatch, the resolution

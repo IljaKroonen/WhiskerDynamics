@@ -92,8 +92,6 @@ static void Publish(
         projectDirectory,
         "-c", configuration,
         "--output", publishDirectory,
-        "--disable-build-servers",
-        "-m:1",
         $"-p:Version={version}",
     })
     {

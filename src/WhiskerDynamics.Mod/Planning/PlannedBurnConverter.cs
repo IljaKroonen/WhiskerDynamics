@@ -28,8 +28,12 @@ namespace WhiskerDynamics.Mod.Planning;
 /// "Reconvert" (writes the fresh VLF through BurnPlanWriter). No automatic rewriting
 /// and no iterative solver: silent mutation could fight the user (or the stock editor)
 /// mid-edit, and one explicit pass converges for the impulse model because burn i's
-/// basis depends only on burns before it. Main-thread only (same phase as the panel;
-/// SampleSpecPose's Surface path walks the live system).</summary>
+/// basis depends only on burns before it. ONE exception: a basis-parent flip (an SOI
+/// handoff rebuilding the patch chain under a pending burn) is not a user edit and
+/// would execute the stored components rotated;
+/// BurnPlannerPanel.AdvanceBasisReconversion re-realizes them automatically
+/// (meta.BasisParentId is the flip detector). Main-thread only
+/// (same phase as the panel; SampleSpecPose's Surface path walks the live system).</summary>
 internal static class PlannedBurnConverter
 {
     /// <summary>Frame-authored burns drift stale when the plan around them changes; a
@@ -41,16 +45,21 @@ internal static class PlannedBurnConverter
     /// burn's CURRENT physical delta-v expressed in its authoring frame (the inverse
     /// conversion — users edit in the frame they authored in); FreshDvVlf is the
     /// authored components converted at the current prediction (what "Reconvert"
-    /// writes). Either is null when its conversion failed — Note says why.</summary>
+    /// writes). Either is null when its conversion failed — Note says why.
+    /// ExecutionRealized suppresses Stale: the stored components are the upkeep's
+    /// execution-basis realization, and their difference from FreshDvVlf IS the
+    /// drift the upkeep corrects — a Reconvert would undo that correction.</summary>
     internal sealed record BurnAnalysis(
         double TimeSeconds,
         Vector3d DvVlf,
         FlightPlanBurnMeta? Meta,
         Vector3d? DisplayComponents,
         Vector3d? FreshDvVlf,
-        string? Note)
+        string? Note,
+        bool ExecutionRealized = false)
     {
-        public bool Stale => Meta is not null && FreshDvVlf is { } fresh
+        public bool Stale => Meta is not null && !ExecutionRealized
+            && FreshDvVlf is { } fresh
             && BurnFrameKernel.IsStale(fresh, DvVlf, StaleToleranceMps);
     }
 
@@ -66,24 +75,88 @@ internal static class PlannedBurnConverter
         dvVlf = default;
         try
         {
-            if (!vessels.TryCaptureRailsAuthority(
-                    vehicle, out var authority, out var authorityReason))
-                return AuthorityFailure(authorityReason);
-            if (TryPredictedBasis(vessels, authority, vehicle, currentOrbit, burns,
-                    burnTimeSeconds,
-                    frame, nowSeconds, out var pose, out var rRel, out var vRel,
-                    out var rFrame, out var vFrame) is { } reason)
+            if (TryAuthoredDvEcl(vessels, vehicle, currentOrbit, burns, burnTimeSeconds,
+                    frame, authored, nowSeconds, out var authority, out var dvEcl,
+                    out var rRel, out var vRel) is { } reason)
                 return reason;
-            // Authored (prograde, radial, normal) of the frame-relative trajectory ->
-            // frame-space delta-v -> ecliptic (axes only, scale-blind) -> stock VLF.
-            if (BurnFrameKernel.FrenetToFrame(authored, rFrame, vFrame) is not { } dvFrame)
-                return "degenerate trajectory in this frame at burn time (vessel nearly stationary or radial in the frame)";
-            var dvEcl = BurnFrameKernel.FrameToEcl(dvFrame, pose);
             if (BurnFrameKernel.EclToVlf(dvEcl, rRel, vRel) is not { } vlf)
                 return "degenerate VLF frame at burn time (radial trajectory)";
-            if (!vessels.ValidateRailsAuthority(authority, out authorityReason))
+            if (!vessels.ValidateRailsAuthority(authority, out var authorityReason))
                 return AuthorityFailure(authorityReason);
             dvVlf = FrameAdapter.ToGame(vlf);
+            return null;
+        }
+        catch (Exception e)
+        {
+            return $"conversion failed: {e.Message}";
+        }
+    }
+
+    /// <summary>Shared authored-side pipeline of both VLF realizations: authority
+    /// capture, then authored components -> frame-space delta-v -> ecliptic. The
+    /// caller validates <paramref name="authority"/> after its game reads. Null
+    /// reason on success.</summary>
+    private static string? TryAuthoredDvEcl(VesselRegistry vessels, Vehicle vehicle,
+        Orbit currentOrbit, IReadOnlyList<Burn> burns, double burnTimeSeconds,
+        FrameSpec frame, Vector3d authored, double nowSeconds,
+        out VesselRegistry.RailsAuthoritySnapshot authority, out Vector3d dvEcl,
+        out Vector3d rRel, out Vector3d vRel)
+    {
+        dvEcl = default;
+        rRel = default;
+        vRel = default;
+        if (!vessels.TryCaptureRailsAuthority(
+                vehicle, out authority, out var authorityReason))
+            return AuthorityFailure(authorityReason);
+        if (TryPredictedBasis(vessels, authority, vehicle, currentOrbit, burns,
+                burnTimeSeconds, frame, nowSeconds, out var pose, out rRel, out vRel,
+                out var rFrame, out var vFrame) is { } reason)
+            return reason;
+        if (BurnFrameKernel.FrenetToFrame(authored, rFrame, vFrame) is not { } dvFrame)
+            return "degenerate trajectory in this frame at burn time (vessel nearly stationary or radial in the frame)";
+        dvEcl = BurnFrameKernel.FrameToEcl(dvFrame, pose);
+        return null;
+    }
+
+    /// <summary>Re-realizes authored frame components into stock VLF against the
+    /// burn's CURRENT stock patch basis — the conic stock executes DeltaVVlf through —
+    /// instead of the predicted n-body basis <see cref="TryAuthorDvVlf"/> uses, so
+    /// conic drift cannot rotate the executed burn. The authored side (what
+    /// "retrograde in this frame" means physically) still comes from the n-body
+    /// prediction. The patch resolution mirrors stock's Burn.Patch getter
+    /// (Burn.cs:100-113) and is deliberately UNSCOPED: it must match what execution
+    /// will actually read. <paramref name="predictorDvVlf"/> is the same intent
+    /// realized against the predicted n-body basis (null when degenerate) — the
+    /// display fold and analysis interpret VLF there, so an execution-basis write
+    /// must hand them this vector. Null reason on success. Never throws.</summary>
+    internal static string? TryAuthorDvVlfForExecution(VesselRegistry vessels,
+        Vehicle vehicle, Orbit currentOrbit, IReadOnlyList<Burn> otherBurns, Burn burn,
+        double burnTimeSeconds, FrameSpec frame, Vector3d authored, double nowSeconds,
+        out double3 dvVlf, out Vector3d? predictorDvVlf)
+    {
+        dvVlf = default;
+        predictorDvVlf = null;
+        try
+        {
+            if (TryAuthoredDvEcl(vessels, vehicle, currentOrbit, otherBurns,
+                    burnTimeSeconds, frame, authored, nowSeconds, out var authority,
+                    out var dvEcl, out var rRel, out var vRel) is { } reason)
+                return reason;
+            PatchedConic? patch = vehicle.FlightComputer.BurnPlan.TryGetBurnPatch(burn)
+                ?? vehicle.FlightPlan.FirstPatch;
+            if (patch is null) return "no stock patch resolves for this burn";
+            if (patch.Orbit.Parent is not { } patchParent)
+                return "stock patch has no parent body";
+            var conicState = patch.Orbit.GetStateVectorsAt(new SimTime(burnTimeSeconds));
+            var cci2Cce = patchParent.GetCci2Cce();
+            Vector3d rConic = FrameAdapter.CciToEcl(conicState.PositionCci, cci2Cce);
+            Vector3d vConic = FrameAdapter.CciToEcl(conicState.VelocityCci, cci2Cce);
+            if (BurnFrameKernel.EclToVlf(dvEcl, rConic, vConic) is not { } vlf)
+                return "degenerate stock VLF basis at burn time (radial patch trajectory)";
+            if (!vessels.ValidateRailsAuthority(authority, out var authorityReason))
+                return AuthorityFailure(authorityReason);
+            dvVlf = FrameAdapter.ToGame(vlf);
+            predictorDvVlf = BurnFrameKernel.EclToVlf(dvEcl, rRel, vRel);
             return null;
         }
         catch (Exception e)
@@ -204,6 +277,8 @@ internal static class PlannedBurnConverter
                     string? note = dvEclCurrent is null ? "degenerate VLF frame at burn time" : null;
                     Vector3d? displayComponents = null;
                     Vector3d? freshDvVlf = null;
+                    bool executionRealized = false;
+                    Vector3d? dvEclFold = null;
                     if (meta is not null && note is null)
                     {
                         if (FrameManager.SampleSpecPose(meta.Frame, t, out var pose) is { } poseReason)
@@ -226,16 +301,32 @@ internal static class PlannedBurnConverter
                             displayComponents = BurnFrameKernel.FrameToFrenet(
                                 BurnFrameKernel.EclToFrame(dvEclCurrent!.Value, pose), rFrame, vFrame);
                             var dvFrame = BurnFrameKernel.FrenetToFrame(meta.Authored, rFrame, vFrame);
-                            freshDvVlf = dvFrame is { } authoredFrame
-                                ? BurnFrameKernel.EclToVlf(
-                                    BurnFrameKernel.FrameToEcl(authoredFrame, pose), rRel, vRel)
+                            Vector3d? dvEclIntent = dvFrame is { } authoredFrame
+                                ? BurnFrameKernel.FrameToEcl(authoredFrame, pose)
+                                : null;
+                            freshDvVlf = dvEclIntent is { } intent
+                                ? BurnFrameKernel.EclToVlf(intent, rRel, vRel)
                                 : null;
                             if (displayComponents is null || freshDvVlf is null)
+                            {
                                 note = "degenerate trajectory in the authoring frame at burn time";
+                            }
+                            else if (meta.ExecutionDvVlf is { } execution
+                                && !BurnFrameKernel.IsStale(execution, dvVlf, StaleToleranceMps))
+                            {
+                                // Execution-basis components: dvEclCurrent read them in
+                                // the predictor basis, rotated by the drift. Show and
+                                // fold the authored intent instead (matching the
+                                // overlay's DisplayDvVlf fold).
+                                executionRealized = true;
+                                displayComponents = meta.Authored;
+                                dvEclFold = dvEclIntent;
+                            }
                         }
                     }
-                    results[i] = new BurnAnalysis(t, dvVlf, meta, displayComponents, freshDvVlf, note);
-                    return dvEclCurrent;
+                    results[i] = new BurnAnalysis(t, dvVlf, meta, displayComponents,
+                        freshDvVlf, note, executionRealized);
+                    return dvEclFold ?? dvEclCurrent;
                 },
                 message => FrameManager.NoteContained("planner conversion pass", message));
             if (!vessels.ValidateRailsAuthority(authority, out _)) return null;
@@ -398,22 +489,21 @@ internal static class PlannedBurnConverter
     }
 
     /// <summary>Parent id for a burn's VLF basis: the parent of the stock PATCH covering
-    /// the burn time, resolved exactly like BurnPlanWriter.TryAdd (chained planned
-    /// timeline first, then the vessel's own flight plan) — stock EXECUTES DeltaVVlf in
-    /// that patch's parent frame, so cross-SOI burns must convert there too (decompiled
-    /// evidence on <see cref="PlannerKernel.BurnBasisParent"/>). Falls
-    /// back to the panel-time orbit parent when no patch resolves or the game read
-    /// faults. CAVEAT on the fallback: across an SOI transition that basis is the wrong
-    /// one, but with no resolvable patch stock has no better answer either (execution
-    /// itself needs a patch — the conic plan simply hasn't predicted that far).</summary>
+    /// the burn time (<see cref="BurnPlanWriter.ResolvePlanningPatch"/>) — stock
+    /// EXECUTES DeltaVVlf in that patch's parent frame, so cross-SOI burns must convert
+    /// there too (decompiled evidence on <see cref="PlannerKernel.BurnBasisParent"/>).
+    /// Falls back to the panel-time orbit parent when no patch resolves or the game
+    /// read faults. CAVEAT on the fallback: across an SOI transition that basis is the
+    /// wrong one, but with no resolvable patch stock has no better answer either
+    /// (execution itself needs a patch — the conic plan simply hasn't predicted that
+    /// far).</summary>
     internal static string BurnParentId(Vehicle vehicle, string fallbackParentId, double burnTimeSeconds)
     {
         string? patchParentId = null;
         try
         {
-            var time = new SimTime(burnTimeSeconds);
-            PatchedConic? patch = vehicle.FlightComputer.BurnPlan.TryGetValidTimeLinePatch(time)
-                ?? vehicle.FlightPlan.TryFindPatch(time);
+            PatchedConic? patch = BurnPlanWriter.ResolvePlanningPatch(
+                vehicle, new SimTime(burnTimeSeconds));
             if (patch?.Orbit.Parent is Astronomical patchParent) patchParentId = patchParent.Id;
         }
         catch (Exception e)
@@ -442,7 +532,10 @@ internal static class PlannedBurnConverter
             return null;
         try
         {
-            PatchedConic? patch = vehicle.FlightComputer.BurnPlan.TryGetBurnPatch(burn);
+            // Scoped so a node kept past an impact-terminated plan resolves here too.
+            PatchedConic? patch;
+            using (Patches.BurnPlanCalculationContext.EnterForVehicle(vehicle))
+                patch = vehicle.FlightComputer.BurnPlan.TryGetBurnPatch(burn);
             return (patch?.Orbit.Parent as Astronomical)?.Id;
         }
         catch (Exception e)
@@ -455,15 +548,20 @@ internal static class PlannedBurnConverter
     /// <summary>Folds every burn strictly earlier than <paramref name="cutoffSeconds"/>
     /// (and past the minimum lead) into the display prediction, basis parents
     /// resolved here (main thread — <see cref="BurnParentId"/> walks game patches),
-    /// through the ONE simple whole-burn fold (<see cref="FoldResolved"/>).</summary>
+    /// through the ONE simple whole-burn fold (<see cref="FoldResolved"/>). The fold
+    /// reads VLF in the predictor basis, so an execution-basis burn folds its
+    /// snapshot-recorded display vector instead (the overlay fold's substitution),
+    /// or later burns would author against a drift-rotated pre-burn trajectory.</summary>
     private static void FoldEarlier(TrackedVessel tracked, Vehicle vehicle, string fallbackParentId,
         TrajectoryPredictor display, IReadOnlyList<Burn> burns, double nowSeconds, double cutoffSeconds)
     {
+        FlightPlanModel? plan = FlightPlans.TryGet(vehicle.Id);
         var earlier = burns
-            .Select(b => (Time: b.Time.Seconds(), DvVlf: b.DeltaVVlf))
+            .Select(b => (Time: b.Time.Seconds(), DvVlf: FrameAdapter.ToCore(b.DeltaVVlf)))
             .Where(b => b.Time < cutoffSeconds)
             .OrderBy(b => b.Time)
-            .Select(b => (b.Time, FrameAdapter.ToCore(b.DvVlf),
+            .Select(b => (b.Time,
+                plan?.SnapshotDisplayDvFor(b.Time, b.DvVlf) ?? b.DvVlf,
                 BurnParentId(vehicle, fallbackParentId, b.Time)))
             .ToArray();
         FoldResolved(tracked, display, earlier, nowSeconds, cutoffSeconds, "planner burn fold");

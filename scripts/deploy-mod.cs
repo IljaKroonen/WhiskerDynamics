@@ -16,9 +16,27 @@ static int Deploy(string[] args)
             return ManifestContainsActiveId(manifest, "WhiskerDynamics") ? 0 : 1;
         }
 
+        if (args is ["--check-manifest-disabled", var disabledPath])
+        {
+            var disabledManifest = File.ReadAllText(disabledPath);
+            return ManifestContainsDisabledId(disabledManifest, "WhiskerDynamics") ? 0 : 1;
+        }
+
         if (args is ["--check-manifest-update", var updatePath])
         {
             EnsureWhiskerDynamicsManifestEntry(updatePath);
+            return 0;
+        }
+
+        if (args is ["--check-game-test-driver-manifest-update", var driverUpdatePath])
+        {
+            EnsureGameTestDriverManifestEntry(driverUpdatePath);
+            return 0;
+        }
+
+        if (args is ["--check-game-test-driver-manifest-gate", var driverGatePath])
+        {
+            EnsureGameTestDriverManifestForDeploy(driverGatePath);
             return 0;
         }
 
@@ -106,10 +124,8 @@ static int Deploy(string[] args)
             includeBodySettings: !gameTestDriver);
         try
         {
-            // Ensure the mod is enabled in the game's manifest. If it already has an entry,
-            // preserve the user's existing enabled state.
             var manifestPath = Path.Combine(docsDirectory, "manifest.toml");
-            if (gameTestDriver) EnsureGameTestDriverManifestEntry(manifestPath);
+            if (gameTestDriver) EnsureGameTestDriverManifestForDeploy(manifestPath);
             else EnsureWhiskerDynamicsManifestEntry(manifestPath);
 
             CommitPreparedDeployment(preparedDeployment);
@@ -162,7 +178,37 @@ static void EnsureWhiskerDynamicsManifestEntry(string manifestPath)
     Console.WriteLine($"enabled Whisker Dynamics in {manifestPath}");
 }
 
-static void EnsureGameTestDriverManifestEntry(string manifestPath)
+/// <summary>Verifies the MAIN mod's entry before the driver enable-edit: the driver
+/// waits on the main mod being Active, and these expected failures must leave
+/// manifest.toml untouched.</summary>
+static void EnsureGameTestDriverManifestForDeploy(string manifestPath)
+{
+    string manifest = File.Exists(manifestPath)
+        ? File.ReadAllText(manifestPath)
+        : "";
+    switch (ClassifyManifestMod(manifest, "WhiskerDynamics"))
+    {
+        case ManifestModState.Missing:
+            throw new InvalidOperationException(
+                "manifest.toml has no 'WhiskerDynamics' entry; deploy the "
+                + "main mod first: dotnet run --file scripts/deploy-mod.cs "
+                + "-- Release");
+        case ManifestModState.Disabled:
+            throw new InvalidOperationException(
+                "'WhiskerDynamics' is disabled in manifest.toml; game tests "
+                + "wait on the main mod and would only fail by wall timeout "
+                + "- re-enable it before deploying the game test driver");
+        case ManifestModState.UnparseableEnabled:
+            throw new InvalidOperationException(
+                "manifest.toml has a 'WhiskerDynamics' entry whose 'enabled' "
+                + "value this script cannot parse; fix it by hand before "
+                + "deploying the game test driver");
+    }
+    EnsureGameTestDriverManifestEntry(manifestPath);
+}
+
+/// <summary>Returns the manifest text after the update.</summary>
+static string EnsureGameTestDriverManifestEntry(string manifestPath)
 {
     const string manifestId = "WhiskerDynamics.GameTestDriver";
     var quote = (char)34;
@@ -175,20 +221,70 @@ static void EnsureGameTestDriverManifestEntry(string manifestPath)
         Directory.CreateDirectory(manifestDirectory);
         File.WriteAllText(manifestPath, manifestEntry);
         Console.WriteLine($"created {manifestPath} with game test driver enabled");
-        return;
+        return manifestEntry;
     }
 
     var manifest = File.ReadAllText(manifestPath);
-    if (ManifestContainsActiveId(manifest, manifestId))
+    if (TryEnableManifestMod(manifest, manifestId, out string updatedManifest,
+            out bool changed))
     {
-        Console.WriteLine(
-            $"game test driver already present in {manifestPath} (enabled state left as-is)");
-        return;
+        // Rewrite only on an actual enable-edit: the round-trip normalizes mixed
+        // line endings, so a text comparison would rewrite on every deploy.
+        if (!changed)
+        {
+            Console.WriteLine($"game test driver already enabled in {manifestPath}");
+            return manifest;
+        }
+        File.WriteAllText(manifestPath, updatedManifest);
+        Console.WriteLine($"enabled game test driver in {manifestPath}");
+        return updatedManifest;
     }
 
-    File.AppendAllText(
-        manifestPath, $"{Environment.NewLine}{manifestEntry}{Environment.NewLine}");
+    string appended = $"{Environment.NewLine}{manifestEntry}{Environment.NewLine}";
+    File.AppendAllText(manifestPath, appended);
     Console.WriteLine($"enabled game test driver in {manifestPath}");
+    return manifest + appended;
+}
+
+static bool TryEnableManifestMod(
+    string manifest, string id, out string updatedManifest, out bool changed)
+{
+    string newline = manifest.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+    var lines = manifest.Replace("\r\n", "\n", StringComparison.Ordinal)
+        .Split('\n')
+        .ToList();
+    var matches = ScanManifestModEntries(lines, id)
+        .Where(entry => entry.IdMatches)
+        .ToList();
+    changed = false;
+
+    // Inserting a second 'enabled' next to an unparseable value would redefine
+    // the key and make the manifest unloadable.
+    if (matches.Any(entry => entry.EnabledLine < 0 && entry.HasUnparseableEnabled))
+        throw new InvalidOperationException(
+            $"manifest entry '{id}' has an 'enabled' value this script cannot "
+            + "parse; fix it by hand before deploying");
+
+    // Edit last entry first: an insert shifts every later line index.
+    foreach (var entry in Enumerable.Reverse(matches))
+    {
+        if (entry.EnabledLine < 0)
+        {
+            lines.Insert(entry.EntryEnd, "enabled = true");
+            changed = true;
+        }
+        else if (!entry.Enabled)
+        {
+            string line = lines[entry.EnabledLine];
+            lines[entry.EnabledLine] = string.Concat(
+                line.AsSpan(0, entry.EnabledValueStart), "true",
+                line.AsSpan(entry.EnabledValueStart + entry.EnabledValueLength));
+            changed = true;
+        }
+    }
+
+    updatedManifest = string.Join(newline, lines);
+    return matches.Count > 0;
 }
 
 static string[] RequiredPublishFiles() =>
@@ -375,30 +471,86 @@ static void CleanupStaging(string stagingDirectory)
         Directory.Delete(stagingDirectory, recursive: true);
 }
 
-static bool ManifestContainsActiveId(string manifest, string id)
+static bool ManifestContainsDisabledId(string manifest, string id) =>
+    ClassifyManifestMod(manifest, id) == ManifestModState.Disabled;
+
+static bool ManifestContainsActiveId(string manifest, string id) =>
+    ClassifyManifestMod(manifest, id) != ManifestModState.Missing;
+
+static ManifestModState ClassifyManifestMod(string manifest, string id)
 {
-    var insideModsEntry = false;
-    foreach (var rawLine in manifest.Split('\n'))
+    var lines = manifest.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+    var state = ManifestModState.Missing;
+    foreach (var entry in ScanManifestModEntries(lines, id))
     {
-        string line = rawLine.TrimEnd('\r');
-        if (TryReadTomlTableHeader(line, out bool arrayTable, out string[] tablePath))
-        {
-            insideModsEntry = arrayTable && tablePath is ["mods"];
-            continue;
-        }
-        if (StartsTomlTableHeader(line))
-        {
-            insideModsEntry = false;
-            continue;
-        }
-        if (insideModsEntry
-            && TryReadTomlAssignment(line, out string key, out string value)
-            && key.Equals("id", StringComparison.Ordinal)
-            && value.Equals(id, StringComparison.Ordinal))
-            return true;
+        if (!entry.IdMatches) continue;
+        if (entry.State != ManifestModState.Enabled) return entry.State;
+        state = ManifestModState.Enabled;
     }
 
-    return false;
+    return state;
+}
+
+/// <summary>The single [[mods]]-entry scanner behind every manifest predicate and
+/// the enable edit. No 'enabled' key counts as Enabled (the game's default); a
+/// non-boolean value is UnparseableEnabled.</summary>
+static IEnumerable<ManifestModEntry> ScanManifestModEntries(
+    IReadOnlyList<string> lines, string id)
+{
+    for (var index = 0; index < lines.Count;)
+    {
+        if (!TryReadTomlTableHeader(lines[index], out bool arrayTable, out string[] tablePath)
+            || !arrayTable
+            || tablePath is not ["mods"])
+        {
+            index++;
+            continue;
+        }
+
+        int entryEnd = index + 1;
+        while (entryEnd < lines.Count && !StartsTomlTableHeader(lines[entryEnd]))
+            entryEnd++;
+
+        var idMatches = false;
+        var enabledLine = -1;
+        var enabledValueStart = -1;
+        var enabledValueLength = 0;
+        var enabled = false;
+        var hasUnparseableEnabled = false;
+        var state = ManifestModState.Enabled;
+        for (int lineIndex = index + 1; lineIndex < entryEnd; lineIndex++)
+        {
+            string line = lines[lineIndex];
+            if (TryReadTomlAssignment(line, out string key, out string value)
+                && key.Equals("id", StringComparison.Ordinal)
+                && value.Equals(id, StringComparison.Ordinal))
+                idMatches = true;
+
+            if (TryReadTomlBooleanAssignment(line, out key, out bool booleanValue,
+                    out int valueStart, out int valueLength)
+                && key.Equals("enabled", StringComparison.Ordinal))
+            {
+                enabledLine = lineIndex;
+                enabledValueStart = valueStart;
+                enabledValueLength = valueLength;
+                enabled = booleanValue;
+                state = booleanValue
+                    ? ManifestModState.Enabled
+                    : ManifestModState.Disabled;
+            }
+            else if (TryReadTomlAssignedKey(line, out string assignedKey)
+                && assignedKey.Equals("enabled", StringComparison.Ordinal))
+            {
+                hasUnparseableEnabled = true;
+                state = ManifestModState.UnparseableEnabled;
+            }
+        }
+
+        yield return new ManifestModEntry(entryEnd, idMatches, enabledLine,
+            enabledValueStart, enabledValueLength, enabled, hasUnparseableEnabled,
+            state);
+        index = entryEnd;
+    }
 }
 
 static bool TryReadTomlTableHeader(
@@ -466,18 +618,7 @@ static bool TryReadTomlAssignment(string line, out string key, out string value)
     var position = 0;
     SkipTomlWhitespace(line, ref position);
     if (position >= line.Length || line[position] == '#') return false;
-
-    if (line[position] is (char)34 or (char)39)
-    {
-        if (!TryReadTomlString(line, ref position, out key)) return false;
-    }
-    else
-    {
-        var keyStart = position;
-        while (position < line.Length && IsTomlBareKeyCharacter(line[position])) position++;
-        if (position == keyStart) return false;
-        key = line[keyStart..position];
-    }
+    if (!TryReadTomlKey(line, ref position, out key)) return false;
 
     SkipTomlWhitespace(line, ref position);
     if (position >= line.Length || line[position] != '=') return false;
@@ -486,6 +627,71 @@ static bool TryReadTomlAssignment(string line, out string key, out string value)
     if (!TryReadTomlString(line, ref position, out value)) return false;
     SkipTomlWhitespace(line, ref position);
     return position == line.Length || line[position] == '#';
+}
+
+/// <summary>Reads the first key segment of any assignment-like line (dotted keys
+/// included), regardless of the value's shape.</summary>
+static bool TryReadTomlAssignedKey(string line, out string key)
+{
+    key = string.Empty;
+    var position = 0;
+    SkipTomlWhitespace(line, ref position);
+    if (position >= line.Length || line[position] == '#') return false;
+    if (!TryReadTomlKey(line, ref position, out key)) return false;
+
+    SkipTomlWhitespace(line, ref position);
+    return position < line.Length && line[position] is '=' or '.';
+}
+
+static bool TryReadTomlBooleanAssignment(
+    string line,
+    out string key,
+    out bool value,
+    out int valueStart,
+    out int valueLength)
+{
+    key = string.Empty;
+    value = false;
+    valueStart = -1;
+    valueLength = 0;
+    var position = 0;
+    SkipTomlWhitespace(line, ref position);
+    if (position >= line.Length || line[position] == '#') return false;
+    if (!TryReadTomlKey(line, ref position, out key)) return false;
+
+    SkipTomlWhitespace(line, ref position);
+    if (position >= line.Length || line[position] != '=') return false;
+    position++;
+    SkipTomlWhitespace(line, ref position);
+    valueStart = position;
+
+    if (line.AsSpan(position).StartsWith("true", StringComparison.Ordinal))
+    {
+        value = true;
+        valueLength = 4;
+    }
+    else if (line.AsSpan(position).StartsWith("false", StringComparison.Ordinal))
+    {
+        valueLength = 5;
+    }
+    else
+        return false;
+
+    position += valueLength;
+    SkipTomlWhitespace(line, ref position);
+    return position == line.Length || line[position] == '#';
+}
+
+static bool TryReadTomlKey(string line, ref int position, out string key)
+{
+    if (line[position] is (char)34 or (char)39)
+        return TryReadTomlString(line, ref position, out key);
+    key = string.Empty;
+    var keyStart = position;
+    while (position < line.Length && IsTomlBareKeyCharacter(line[position])) position++;
+    if (position == keyStart) return false;
+    key = line[keyStart..position];
+    return true;
 }
 
 static bool TryReadTomlString(string source, ref int position, out string value)
@@ -593,6 +799,18 @@ static void SkipTomlWhitespace(string source, ref int position)
 static string GetScriptDirectory([CallerFilePath] string sourcePath = "") =>
     Path.GetDirectoryName(sourcePath)
     ?? throw new InvalidOperationException("could not locate the deployment script");
+
+enum ManifestModState { Missing, Enabled, Disabled, UnparseableEnabled }
+
+sealed record ManifestModEntry(
+    int EntryEnd,
+    bool IdMatches,
+    int EnabledLine,
+    int EnabledValueStart,
+    int EnabledValueLength,
+    bool Enabled,
+    bool HasUnparseableEnabled,
+    ManifestModState State);
 
 sealed record DeploymentFile(string SourcePath, string DestinationName);
 
