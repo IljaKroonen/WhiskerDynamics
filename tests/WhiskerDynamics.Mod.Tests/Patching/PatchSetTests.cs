@@ -25,7 +25,7 @@ public class PatchSetTests
             .GetCustomAttributes<AssemblyMetadataAttribute>()
             .Where(attribute => attribute.Key == "VerifiedKsaBuild");
         var verifiedBuild = Assert.Single(metadata);
-        Assert.Equal("2026.7.10.5056", verifiedBuild.Value);
+        Assert.Equal("2026.8.3.5117", verifiedBuild.Value);
         Assert.Equal(verifiedBuild.Value, GameBuildPolicy.VerifiedBuild);
         Assert.True(GameBuildPolicy.IsVerified(verifiedBuild.Value!));
         Assert.False(GameBuildPolicy.IsVerified("2026.7.5.4892"));
@@ -35,7 +35,7 @@ public class PatchSetTests
     public void Compatibility_catalog_shape_is_characterized()
     {
         Assert.Single(PanelTargets.Panel);
-        Assert.Equal(270, GameplayTargets.Gameplay.Length);
+        Assert.Equal(273, GameplayTargets.Gameplay.Length);
         Assert.True(EnumContract.Validate(out var mismatches));
         Assert.Empty(mismatches);
     }

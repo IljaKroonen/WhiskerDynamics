@@ -8,13 +8,13 @@ namespace WhiskerDynamics.Mod.Patches;
 /// suppressed before routing. While the controlled vessel has a FRESH published
 /// n-body batch, this prefix routes each FlightPlan.AddLineInstances call three ways
 /// on the plan INSTANCE:
-/// (1) the vehicle's OWN plan (Vehicle.cs:4359) — stage the batch into patch-0's orbit
+/// (1) the vehicle's OWN plan (Vehicle.cs:5007) — stage the batch into patch-0's orbit
 /// point cache (the render-phase last-writer role: staged immediately before the
 /// read) and draw that single line with
-/// joinEnds:false (no fake closing chord on an open arc, Orbit.cs:2231-2234) and stock
-/// color semantics (FlightPlan.cs:660-663), then SKIP the original: stock's patch i&gt;=1
+/// joinEnds:false (no fake closing chord on an open arc, Orbit.cs:2301/2363) and stock
+/// color semantics (FlightPlan.cs:777-781), then SKIP the original: stock's patch i&gt;=1
 /// conics are what "remove the stock orbital lines" removes;
-/// (2) one of the vessel's planned burns' plans (BurnPlan.cs:369-382 calls
+/// (2) one of the vessel's planned burns' plans (BurnPlan.cs:397-411 calls
 /// burn.FlightPlan.AddLineInstances once per burn; BurnPlan.AddLineInstances draws
 /// nothing itself) — two-line display: the EARLIEST burn's plan
 /// is the PLANNED-line canvas — the planned batch (all in-window burns folded, sampled
@@ -26,7 +26,7 @@ namespace WhiskerDynamics.Mod.Patches;
 /// drawn elsewhere (Burn.Update -&gt; UpdateGizmos, Burn.cs:181-188) and are
 /// repositioned onto the drawn lines by BurnNodePatch;
 /// (3) any other controlled-vessel plan (the TransferPlanner preview,
-/// TransferPlanner.cs:1037 — by design the stock planning tool stays untouched — and
+/// TransferPlanner.cs:1035 — by design the stock planning tool stays untouched — and
 /// any future caller) — original runs, stock draws.
 /// The instance routing composes with three-way CONTEXT routing
 /// (<see cref="LineRoute"/>): before the own-plan path stages anything, a fresh batch
@@ -362,7 +362,7 @@ internal static class VesselLinePatch
                     return true;
 
                 // Stale fallback: draw ONLY patch 0 the stock way (stock colors,
-                // stock gates — mirrors FlightPlan.AddLineInstances:647-673 for one
+                // stock gates — mirrors FlightPlan.AddLineInstances:763-819 for one
                 // patch) and keep the rest suppressed. The patch-0 cache holds either
                 // our last staged points (briefly) or stock's regenerated conic
                 // points (RecalculateFlightPlan/re-osculation refresh them), so a
@@ -395,7 +395,7 @@ internal static class VesselLinePatch
                     DiagnosticDisplay.ShowStockPatchedConics, ref __state);
             }
 
-            // Stock's own first gate (FlightPlan.cs:647): an orbit the player hid stays
+            // Stock's own first gate (FlightPlan.cs:763): an orbit the player hid stays
             // hidden — but the stock conics stay suppressed (false), not re-drawn.
             if (!vehicle.ShowOrbit && !vehicle.TargetOfControlledVehicle)
                 return CompleteDisplayRoute(
@@ -581,7 +581,8 @@ internal static class VesselLinePatch
     }
 
     /// <summary>Stale-window fallback: patch 0 drawn the STOCK way (stock's own gates
-    /// and colors, FlightPlan.cs:647-673 mirrored for one patch) while every other
+    /// and colors, FlightPlan.cs:763-819 mirrored for one patch; the new danger-track
+    /// tail of DrawLines stays at its defaults) while every other
     /// stock conic stays suppressed — the ownership rule's "a line always remains"
     /// half. joinEnds:true matches stock's closed-ellipse rendering for conic points
     /// (our stale staged points draw with a harmless closing chord for the ≤seconds

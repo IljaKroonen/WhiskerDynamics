@@ -183,8 +183,8 @@ internal static class GameTestScenarioPatch
         if (activeCores == 0)
             return;
         Pass(step, $"activated {count} staging sequences; "
-            + $"active main-engine cores {activeCores}, vacuum flow "
-            + $"{vessel.FlightComputer.VehicleConfig.TotalEngineVacuumMassFlowRate:F3} kg/s");
+            + $"active main-engine cores {activeCores}, active engine flow "
+            + $"{vessel.FlightComputer.ActiveEngineMassFlowRate:F3} kg/s");
     }
 
     private static void PlanAndExecuteLunarTransfer(GameTestStep step)
@@ -781,7 +781,7 @@ internal static class GameTestScenarioPatch
             Require(_burnTargetMagnitude > 0 && float.IsFinite(_burnTargetMagnitude),
                 "next burn has no finite delta-v target");
             ModLog.Info($"game test: arming {_burnTargetMagnitude:F2} m/s burn; "
-                + $"mode={computer.BurnMode}, engine flow={computer.VehicleConfig.TotalEngineVacuumMassFlowRate:F3} kg/s");
+                + $"mode={computer.BurnMode}, engine flow={computer.ActiveEngineMassFlowRate:F3} kg/s");
             QueueFlightComputer(vessel, FlightComputerBurnMode.Auto);
             _burnExecutionStage = 1;
             return;

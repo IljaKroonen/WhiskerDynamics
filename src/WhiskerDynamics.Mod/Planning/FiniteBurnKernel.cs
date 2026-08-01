@@ -1,7 +1,8 @@
 namespace WhiskerDynamics.Mod.Planning;
 
 /// <summary>Engine/mass scalars captured from the stock flight computer at snapshot
-/// time (FlightComputer.ReadUpdatedVehicleConfiguration totals): everything the
+/// time (TotalMassPropsBody.Mass and the ActiveEngineThrust/ActiveEngineMassFlowRate
+/// performance sums): everything the
 /// finite-burn estimate needs, and nothing main-thread-bound — the rails worker only
 /// ever sees these three numbers. Zeroed or absent scalars
 /// are simply not <see cref="Usable"/> and the fold keeps impulsive burns.</summary>
@@ -82,13 +83,14 @@ public readonly record struct FiniteBurnCommand(
 /// The executor's semantics are deterministic and fully determined by three scalars
 /// (the stock flight-computer contract):
 ///   - duration is the rocket equation at full throttle — propellant =
-///     m·(1 − e^(−Δv/vₑ)), duration = propellant / ṁ (UpdateBurnTarget, :722-730;
-///     Auto mode commands throttle 1, ComputeBurnControl :693);
+///     m·(1 − e^(−Δv/vₑ)), duration = propellant / ṁ (UpdateBurnTarget, :750-756;
+///     Auto mode commands throttle 1, ComputeBurnControl :703);
 ///   - the burn is CENTERED on the node: IgnitionTime = ImpulsiveInstant − duration/2
-///     (:735);
+///     (:762);
 ///   - steering is a fixed inertial direction: the FC points along DeltaVToGoCci =
 ///     target − accumulated, and the accumulator integrates thrust-only velocity
-///     changes (BurnTarget.cs:22; DeltaVAccumCci += DeltaVelocityCci, :303, which
+///     changes (BurnTarget.cs:22; DeltaVAccumCci += DeltaVelocityCci,
+///     FlightComputer.cs:299, which
 ///     excludes gravity), so thrust along to-go keeps the accumulator collinear with
 ///     the target — the direction never moves in the error-free estimate.
 /// The estimate is therefore a discretization choice, not a model choice: K
@@ -98,7 +100,7 @@ public readonly record struct FiniteBurnCommand(
 public static class FiniteBurnKernel
 {
     /// <summary>Full-throttle burn duration, seconds — the FC's own formula
-    /// (FlightComputer.cs:722-730). 0 for a non-positive delta-v.</summary>
+    /// (FlightComputer.cs:750-756). 0 for a non-positive delta-v.</summary>
     public static double BurnDurationSeconds(double dvMagnitude, EngineScalars engine)
     {
         if (!engine.Usable || !(dvMagnitude > 0)) return 0.0;

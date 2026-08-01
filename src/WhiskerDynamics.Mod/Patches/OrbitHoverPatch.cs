@@ -279,7 +279,7 @@ internal static class OrbitHoverPatch
             _context = context;
             _camera = camera;
             _parentEgo = parentEgo;
-            _forward = camera.GetForward();
+            _forward = camera.GetForwardEcl();
             _framed = framed;
         }
 
