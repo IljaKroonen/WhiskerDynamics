@@ -35,7 +35,7 @@ public class PatchSetTests
     public void Compatibility_catalog_shape_is_characterized()
     {
         Assert.Single(PanelTargets.Panel);
-        Assert.Equal(273, GameplayTargets.Gameplay.Length);
+        Assert.Equal(277, GameplayTargets.Gameplay.Length);
         Assert.True(EnumContract.Validate(out var mismatches));
         Assert.Empty(mismatches);
     }
@@ -83,9 +83,10 @@ public class PatchSetTests
             typeof(BurnNodePatch),
             typeof(BurnGizmoPatch),
             typeof(BurnClickPatch),
+            typeof(KittenRemovalPatch),
         ];
 
-        Assert.Equal(28, GameplayPatchSet.PatchTypes.Count);
+        Assert.Equal(29, GameplayPatchSet.PatchTypes.Count);
         Assert.Equal(expected, GameplayPatchSet.PatchTypes);
         Assert.Equal(expected.Length, expected.Distinct().Count());
         Assert.DoesNotContain(typeof(StatusPanelPatch), GameplayPatchSet.PatchTypes);

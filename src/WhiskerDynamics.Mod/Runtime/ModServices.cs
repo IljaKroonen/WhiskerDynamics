@@ -246,6 +246,7 @@ public static class ModServices
         Patches.BurnNodePatch.ResetSessionStatics();
         Patches.BurnGizmoPatch.ResetSessionStatics();
         Patches.BurnClickPatch.ResetSessionStatics();
+        Patches.KittenRemovalPatch.ResetSessionStatics();
     }
 
     public static void FatalDisable(string reason)

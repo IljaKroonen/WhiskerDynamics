@@ -695,6 +695,18 @@ internal static class GameplayTargets
             [typeof(Brutal.ImGuiApi.ImDrawListPtr), typeof(float2), typeof(Brutal.ImGuiApi.ImString), typeof(byte4)],
             typeof(void)),
 
+        // Starting-kitten removal (KittenRemovalPatch)
+        new("InputEvents.VehicleDestroyBuffer", typeof(InputEvents), "VehicleDestroyBuffer",
+            MemberKind.Field, null,
+            typeof(InputEvents.TypedBuffer<InputEvents.VehicleDestroyData>), IsStatic: true),
+        new("TypedBuffer<VehicleDestroyData>.Add",
+            typeof(InputEvents.TypedBuffer<InputEvents.VehicleDestroyData>),
+            "Add", MemberKind.Method, [typeof(InputEvents.VehicleDestroyData)], typeof(void)),
+        new("VehicleDestroyData.Vehicle", typeof(InputEvents.VehicleDestroyData),
+            "Vehicle", MemberKind.Field, null, typeof(Vehicle), IsStatic: false),
+        new("KittenEva.Character", typeof(KittenEva), "Character",
+            MemberKind.Field, null, typeof(CharacterReference), IsStatic: false),
+
         // Game constants the physics depends on
         new("Constants.GRAVITATIONAL_CONSTANT", typeof(Constants), "GRAVITATIONAL_CONSTANT", MemberKind.Field, null, typeof(double), IsStatic: true),
         new("Constants.SOLAR_MASS", typeof(Constants), "SOLAR_MASS", MemberKind.Field, null, typeof(double), IsStatic: true),
