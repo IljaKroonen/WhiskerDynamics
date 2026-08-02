@@ -33,6 +33,7 @@ public sealed class GameTestStep
     public int? OrbitOffset { get; set; }
     public int? StageCount { get; set; }
     public bool? LunarCircularization { get; set; }
+    public bool? ExpectSoiCrossing { get; set; }
     public double? TimeoutSeconds { get; set; }
     public double? DurationSeconds { get; set; }
     public double? OffsetSeconds { get; set; }
@@ -143,13 +144,15 @@ public sealed class GameScenarioBuilder
     /// <summary>lunarCircularization: leave the simulation speed alone through the
     /// cutoff and keep the plan for the following CompleteLunarOrbit step.</summary>
     public GameScenarioBuilder ExecuteBurns(string? vessel = null,
-        double? timeoutSeconds = null, bool lunarCircularization = false) =>
+        double? timeoutSeconds = null, bool lunarCircularization = false,
+        bool expectSoiCrossing = false) =>
         Add(new GameTestStep
         {
             Action = "execute-burns",
             Vessel = vessel,
             TimeoutSeconds = timeoutSeconds,
             LunarCircularization = lunarCircularization ? true : null,
+            ExpectSoiCrossing = expectSoiCrossing ? true : null,
         });
 
     public GameScenarioBuilder AssertParent(string expected, string? vessel = null) =>

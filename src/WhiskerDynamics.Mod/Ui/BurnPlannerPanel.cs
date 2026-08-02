@@ -163,6 +163,7 @@ public static class BurnPlannerPanel
         _burnSnapshotSignature = long.MinValue;
         _burnSnapshot = [];
         DurationField.ResetSessionStatics();
+        BasisReconversionUrgency.Reset();
         InvalidateAnalysis();
         ClosePicker();
         PickerTree.Reset();
@@ -198,33 +199,61 @@ public static class BurnPlannerPanel
     /// not.</summary>
     private static void AdvanceBasisReconversion(VesselRegistry vessels)
     {
-        if (Environment.TickCount64 < _nextBasisUpkeepMs) return;
-        _nextBasisUpkeepMs = Environment.TickCount64 + 1000;
+        bool cadenceDue = Environment.TickCount64 >= _nextBasisUpkeepMs;
+        if (!cadenceDue && !BasisReconversionUrgency.Any) return;
+        if (cadenceDue) _nextBasisUpkeepMs = Environment.TickCount64 + 1000;
         double now = Universe.GetElapsedSimTime().Seconds();
-        foreach (var (vesselId, plan) in FlightPlans.SnapshotForUpkeep())
+        var upkeep = FlightPlans.SnapshotForUpkeep();
+        ClearOrphanedUrgency(upkeep);
+        foreach (var (vesselId, plan) in upkeep)
         {
+            long? urgency = BasisReconversionUrgency.Observe(vesselId);
+            if (!cadenceDue && urgency is null) continue;
             // A conversion folded on a diverged predictor would be wrong; rebase
             // owns that recovery.
-            if (plan.Meta.Count == 0 || plan.Diverged) continue;
+            if (plan.Meta.Count == 0 || plan.Diverged)
+            {
+                BasisReconversionUrgency.Clear(vesselId);
+                continue;
+            }
             Vehicle? vehicle = vessels.TryGetLiveVehicle(vesselId);
             if (vehicle is null) continue;
             if (!PlannedBurnConverter.ExistingBurnParentsReady(vehicle)) continue;
             IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vehicle);
+            bool settled = true;
             foreach (Burn burn in burns)
             {
                 double t = burn.Time.Seconds();
                 if (plan.TryGetMetaAt(t) is not { } meta) continue;
                 string? resolved =
                     PlannedBurnConverter.ExistingBurnParentId(vehicle, burn);
-                if (resolved is null) continue;
+                if (resolved is null)
+                {
+                    settled = false;
+                    continue;
+                }
                 if (meta.BasisParentId is null)
                     meta.BasisParentId = resolved;
-                if (!PlannerKernel.SafelyAheadForRewrite(t, now)) continue;
+                bool flipped = !string.Equals(meta.BasisParentId, resolved,
+                    StringComparison.Ordinal);
+                if (!PlannerKernel.SafelyAheadForRewrite(t, now))
+                {
+                    if (flipped && Environment.TickCount64 >= _nextBasisReconvertWarnMs)
+                    {
+                        _nextBasisReconvertWarnMs = Environment.TickCount64 + 5000;
+                        ModLog.Warn($"planner: burn at t={t:F1} s for '{vesselId}' executes "
+                            + $"in basis '{resolved}' but its components were realized for "
+                            + $"'{meta.BasisParentId}'; too close to ignition to re-realize - "
+                            + "expect a rotated burn direction");
+                    }
+                    continue;
+                }
                 if (PlannedBurnConverter.TryAuthorDvVlfForExecution(vessels, vehicle,
                         vehicle.Orbit, OthersExcept(burns, burn), burn, t, meta.Frame,
                         meta.Authored, now, out var dvVlf,
                         out var predictorDvVlf) is { } refusal)
                 {
+                    settled = false;
                     if (Environment.TickCount64 >= _nextBasisReconvertWarnMs)
                     {
                         _nextBasisReconvertWarnMs = Environment.TickCount64 + 5000;
@@ -233,8 +262,6 @@ public static class BurnPlannerPanel
                     }
                     continue;
                 }
-                bool flipped = !string.Equals(meta.BasisParentId, resolved,
-                    StringComparison.Ordinal);
                 if (!flipped && !BurnFrameKernel.IsStale(FrameAdapter.ToCore(dvVlf),
                         FrameAdapter.ToCore(burn.DeltaVVlf),
                         PlannerKernel.ExecutionRealizeToleranceMps))
@@ -247,7 +274,10 @@ public static class BurnPlannerPanel
                 if (BurnPlanWriter.TryEditDv(vehicle, burn, dvVlf.X, dvVlf.Y, dvVlf.Z,
                         predictorDvVlf)
                     != "applied")
+                {
+                    settled = false;
                     continue;
+                }
                 string previous = meta.BasisParentId;
                 meta.BasisParentId = resolved;
                 meta.ExecutionDvVlf = FrameAdapter.ToCore(dvVlf);
@@ -258,6 +288,25 @@ public static class BurnPlannerPanel
                     : $"planner: burn at t={t:F1} s for '{vesselId}' re-realized against "
                       + $"the drifted stock patch basis ({meta.Frame.Label})");
             }
+            if (settled && urgency is { } observed)
+                BasisReconversionUrgency.Clear(vesselId, observed);
+        }
+    }
+
+    private static void ClearOrphanedUrgency(
+        List<KeyValuePair<string, FlightPlanModel>> upkeep)
+    {
+        if (!BasisReconversionUrgency.Any) return;
+        foreach (string vesselId in BasisReconversionUrgency.Snapshot())
+        {
+            bool known = false;
+            foreach (var (id, _) in upkeep)
+                if (string.Equals(id, vesselId, StringComparison.Ordinal))
+                {
+                    known = true;
+                    break;
+                }
+            if (!known) BasisReconversionUrgency.Clear(vesselId);
         }
     }
 

@@ -26,6 +26,8 @@ internal static class GameTestScenarioPatch
     private static int _burnsExecuted;
     private static float _burnTargetMagnitude;
     private static bool _burnExecutionWarpEngaged;
+    private static bool _soiCrossingObserved;
+    private static string? _soiCrossingStartParentId;
     private static GameTestPlayerLunarTransferSolveJob? _playerLunarTransferJob;
     private static GameTestPlayerLunarCorrectionSolveJob? _playerLunarCorrectionJob;
     private static bool _playerLunarCorrectionQueued;
@@ -700,6 +702,8 @@ internal static class GameTestScenarioPatch
         _burnsExecuted = 0;
         _burnTargetMagnitude = 0;
         _burnExecutionWarpEngaged = false;
+        _soiCrossingObserved = false;
+        _soiCrossingStartParentId = null;
         _lunarOrbitStartTime = null;
         _lunarOrbitPeriod = 0;
         _lunarOrbitStartState = default;
@@ -804,7 +808,17 @@ internal static class GameTestScenarioPatch
             ModLog.Info($"game test: auto burn accepted; ignition t={ignition:F1}, now={now:F1}, "
                 + $"remaining={target.DeltaVToGoCci.Length():F2} m/s");
             ToggleFlightComputer(vessel, FlightComputerAction.WarpToNextBurn);
-            ModLog.Info("game test: pressed KSA built-in Auto Warp for next burn");
+            if (step.ExpectSoiCrossing ?? false)
+            {
+                _soiCrossingStartParentId = (vessel.Orbit.Parent as Astronomical)?.Id;
+                _soiCrossingObserved = false;
+                ModLog.Info("game test: pressed KSA built-in Auto Warp at burn "
+                    + "scheduling; an SOI crossing is expected during the warp");
+            }
+            else
+            {
+                ModLog.Info("game test: pressed KSA built-in Auto Warp for next burn");
+            }
             _burnExecutionStage = 2;
             return;
         }
@@ -820,6 +834,20 @@ internal static class GameTestScenarioPatch
                 Require(burns.Count >= _burnExecutionBaselineCount,
                     "burn plan disappeared before automatic burn completion");
                 return;
+            }
+            if ((step.ExpectSoiCrossing ?? false) && !_soiCrossingObserved)
+            {
+                string? parentId = (vessel.Orbit.Parent as Astronomical)?.Id;
+                if (!string.Equals(parentId, _soiCrossingStartParentId,
+                        StringComparison.Ordinal))
+                {
+                    _soiCrossingObserved = true;
+                    double toIgnition = target.IgnitionTime.Seconds()
+                        - Universe.GetElapsedSimTime().Seconds();
+                    ModLog.Info("game test: SOI crossing observed under built-in "
+                        + $"Auto Warp ('{_soiCrossingStartParentId}' -> '{parentId}', "
+                        + $"{toIgnition:F0} s to ignition)");
+                }
             }
             if (Universe.IsAutoWarpActive) return;
             if (computer.BurnMode == FlightComputerBurnMode.Auto)
@@ -864,6 +892,10 @@ internal static class GameTestScenarioPatch
                     && (completionDot <= 0
                         || remaining <= automaticBurnResidualToleranceMps),
                 $"automatic burn stopped with {remaining:F2} m/s remaining of {_burnTargetMagnitude:F2} m/s");
+            if (step.ExpectSoiCrossing ?? false)
+                Require(_soiCrossingObserved,
+                    "the burn executed without an SOI crossing during the warp; "
+                    + "the basis-flip race was not exercised");
             if (step.LunarCircularization ?? false)
             {
                 _burnsExecuted++;
