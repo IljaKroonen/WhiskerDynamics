@@ -7,7 +7,7 @@ namespace WhiskerDynamics.Mod.Vessels;
 /// immutable plan snapshot. Kept as one value so a newly added sampling knob cannot be
 /// accidentally compared at one cache site but omitted at another.</summary>
 internal readonly record struct PlannedGeometryKey(
-    double PlanEnd, double CoverageLimitedEnd, double ConfigHorizonDays, double ConfigRailsAheadDays,
+    double PlanEnd, double ConfigHorizonDays, double ConfigRailsAheadDays,
     double ThetaMax, int MaxDensePoints,
     double FiniteBurnSliceSeconds, int FiniteBurnMaxSlices);
 

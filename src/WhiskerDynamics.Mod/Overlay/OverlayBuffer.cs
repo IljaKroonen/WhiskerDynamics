@@ -86,12 +86,6 @@ public sealed record OverlaySamples
     /// any value invalidate actual-line reuse immediately.</summary>
     public required double SamplingThetaMax { get; init; }
     public required int SamplingMaxDensePoints { get; init; }
-    /// <summary>Last time reached by the adaptive sampler before any physical display
-    /// cut (such as surface impact). Usually equals DenseTimes[^1]. Kept separately so
-    /// a capped-then-collision-cut actual line can still bound planned integration by
-    /// its true numerical coverage while branch continuity uses the visible impact
-    /// endpoint.</summary>
-    public double CoverageEndSeconds { get; init; } = double.NaN;
     /// <summary>Honest line markers for this batch (first upcoming Ap/Pe per
     /// frame-relevant body + AN/DN vs the mode's natural plane) — see
     /// TrajectoryOverlay's marker computation. Empty when none resolved.</summary>

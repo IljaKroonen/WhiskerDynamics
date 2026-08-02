@@ -1434,19 +1434,10 @@ public static class TrajectoryOverlay
             return (0, false, false);
         }
 
-        bool actualCoverageLimited = actualSamples.Truncated || actualSamples.WorkLimited
-            || actualSamples.DynamicsLimited;
         double actualVisibleEnd = actualSamples.DenseTimes.Length > 0
             ? actualSamples.DenseTimes[^1] : scope.T0;
-        double actualCoverageEnd = double.IsFinite(actualSamples.CoverageEndSeconds)
-            ? actualSamples.CoverageEndSeconds : actualVisibleEnd;
         double plannedHorizon = OverlayKernel.PlannedHorizonSeconds(scope.Horizon,
-            plan?.EndSeconds ?? double.NaN, actualCoverageEnd, actualCoverageLimited);
-        // Only a resource-imposed endpoint belongs in the geometry identity. Normal
-        // requested horizons roll with now for planless/long-plan cases; keying those
-        // absolute values would defeat the fixed-window planned-restamp policy and
-        // force a full fold/sample every cadence.
-        double coverageLimitedEnd = actualCoverageLimited ? plannedHorizon : double.NaN;
+            plan?.EndSeconds ?? double.NaN);
         double? start = OverlayKernel.SnapshotSampleStart(snapshot.BurnTimes, scope.T0, plannedHorizon, diverged);
         if (start is null || plannedHorizon - start.Value <= 0.0)
         {
@@ -1471,7 +1462,7 @@ public static class TrajectoryOverlay
                 sameFrame: OverlayKernel.ModeMatches(published.FrameLabel, scope.ActiveFrame?.Label)
                     && OverlayKernel.FrameAllowsPlannedRestamp(scope.ActiveFrame),
                 sameGeometryInputs: tracked.LastPlannedGeometryKey is { } geometryKey
-                    && geometryKey.Equals(scope.PlannedGeometryKeyFor(coverageLimitedEnd))
+                    && geometryKey.Equals(scope.PlannedGeometryKey)
                     && ReferenceEquals(tracked.LastPlannedGravity, scope.Prediction.Gravity)
                     && !OverlayKernel.PlannedCoverageExpansionDue(
                         tracked.LastPlannedRailsCoverageDays,
@@ -1656,7 +1647,7 @@ public static class TrajectoryOverlay
         tracked.LastPlannedDiverged = diverged;
         tracked.LastPlannedStart = start.Value;
         tracked.LastPlannedBurnsApplied = burnsApplied;
-        tracked.LastPlannedGeometryKey = scope.PlannedGeometryKeyFor(coverageLimitedEnd);
+        tracked.LastPlannedGeometryKey = scope.PlannedGeometryKey;
         tracked.LastPlannedRailsCoverageDays = scope.RailsAheadDays;
         return (burnsApplied, batch.Truncated, batch.DynamicsLimited);
     }
@@ -1802,8 +1793,8 @@ public static class TrajectoryOverlay
         /// the pre-burn trajectory).</summary>
         public required Func<TrajectoryPredictor> PlannedSeed { get; init; }
 
-        public PlannedGeometryKey PlannedGeometryKeyFor(double coverageLimitedEnd) => new(
-            PlanEnd, coverageLimitedEnd, ConfigHorizonDays, ConfigRailsAheadDays,
+        public PlannedGeometryKey PlannedGeometryKey => new(
+            PlanEnd, ConfigHorizonDays, ConfigRailsAheadDays,
             ThetaMax, MaxDensePoints,
             FiniteBurnSliceSeconds, FiniteBurnMaxSlices);
 
@@ -2504,7 +2495,6 @@ public static class TrajectoryOverlay
                 HorizonSeconds = sampleHorizon,
                 SamplingThetaMax = ThetaMax,
                 SamplingMaxDensePoints = MaxDensePoints,
-                CoverageEndSeconds = sampled.Times[^1],
                 Markers = markers,
                 MarkerCandidates = markerCandidates,
                 MarkerCacheKey = this.MarkerCacheKey,

@@ -843,14 +843,13 @@ public class PlanSnapshotTests
     public void Planned_geometry_key_invalidates_every_sampling_and_finite_burn_knob()
     {
         var baseline = new PlannedGeometryKey(
-            PlanEnd: 9000, CoverageLimitedEnd: 9000,
+            PlanEnd: 9000,
             ConfigHorizonDays: 30, ConfigRailsAheadDays: 30,
             ThetaMax: 0.01, MaxDensePoints: 65536,
             FiniteBurnSliceSeconds: 20, FiniteBurnMaxSlices: 32);
 
         Assert.Equal(baseline, baseline with { });
         Assert.NotEqual(baseline, baseline with { PlanEnd = 9001 });
-        Assert.NotEqual(baseline, baseline with { CoverageLimitedEnd = 8999 });
         Assert.NotEqual(baseline, baseline with { ConfigHorizonDays = 31 });
         Assert.NotEqual(baseline, baseline with { ConfigRailsAheadDays = 20 });
         Assert.NotEqual(baseline, baseline with { ThetaMax = 0.02 });

@@ -209,39 +209,32 @@ public class PlannedHorizonTests
         const double actualHorizon = 30 * 86400.0;
         const double planEnd = 7 * 86400.0;
 
-        Assert.Equal(planEnd, OverlayKernel.PlannedHorizonSeconds(
-            actualHorizon, planEnd, actualHorizon, actualCoverageLimited: false));
+        Assert.Equal(planEnd, OverlayKernel.PlannedHorizonSeconds(actualHorizon, planEnd));
     }
 
     [Fact]
     public void Longer_plan_uses_the_actual_requested_horizon()
         => Assert.Equal(30 * 86400.0, OverlayKernel.PlannedHorizonSeconds(
-            30 * 86400.0, 60 * 86400.0, 30 * 86400.0,
-            actualCoverageLimited: false));
+            30 * 86400.0, 60 * 86400.0));
 
     [Fact]
-    public void Limited_actual_coverage_prevents_a_floating_planned_branch()
-        => Assert.Equal(10 * 86400.0, OverlayKernel.PlannedHorizonSeconds(
-            30 * 86400.0, 30 * 86400.0, 10 * 86400.0,
-            actualCoverageLimited: true));
+    public void Truncated_actual_coverage_does_not_cap_the_planned_horizon()
+    {
+        double plannedEnd = OverlayKernel.PlannedHorizonSeconds(30 * 86400.0, 30 * 86400.0);
 
-    [Fact]
-    public void Ordinary_short_actual_endpoint_does_not_hide_collision_avoidance_plan()
-        => Assert.Equal(30 * 86400.0, OverlayKernel.PlannedHorizonSeconds(
-            30 * 86400.0, 30 * 86400.0, 2 * 86400.0,
-            actualCoverageLimited: false));
+        Assert.Equal(30 * 86400.0, plannedEnd);
+        // Connectivity still governs: the branch point must lie on the achieved
+        // actual line (here truncated at day 10).
+        Assert.True(OverlayKernel.PlannedBranchConnected(
+            5 * 86400.0, 10 * 86400.0, plannedEnd));
+        Assert.False(OverlayKernel.PlannedBranchConnected(
+            15 * 86400.0, 10 * 86400.0, plannedEnd));
+    }
 
     [Fact]
     public void Planless_stock_burns_keep_the_actual_horizon()
         => Assert.Equal(30 * 86400.0, OverlayKernel.PlannedHorizonSeconds(
-            30 * 86400.0, double.NaN, 10 * 86400.0,
-            actualCoverageLimited: false));
-
-    [Fact]
-    public void Planless_stock_burns_respect_limited_actual_coverage()
-        => Assert.Equal(10 * 86400.0, OverlayKernel.PlannedHorizonSeconds(
-            30 * 86400.0, double.NaN, 10 * 86400.0,
-            actualCoverageLimited: true));
+            30 * 86400.0, double.NaN));
 
     [Fact]
     public void Pre_collision_branch_may_continue_beyond_the_actual_impact()
@@ -267,15 +260,13 @@ public class PlannedHorizonTests
     }
 
     [Fact]
-    public void Capped_then_collision_cut_uses_coverage_for_end_and_impact_for_branch()
+    public void Capped_then_collision_cut_keeps_the_impact_for_branch()
     {
         double requested = 30 * 86400.0;
-        double numericalCoverage = 10 * 86400.0;
         double visibleImpact = 2 * 86400.0;
-        double plannedEnd = OverlayKernel.PlannedHorizonSeconds(
-            requested, requested, numericalCoverage, actualCoverageLimited: true);
+        double plannedEnd = OverlayKernel.PlannedHorizonSeconds(requested, requested);
 
-        Assert.Equal(numericalCoverage, plannedEnd);
+        Assert.Equal(requested, plannedEnd);
         Assert.True(OverlayKernel.PlannedBranchConnected(
             1.5 * 86400.0, visibleImpact, plannedEnd));
         Assert.False(OverlayKernel.PlannedBranchConnected(

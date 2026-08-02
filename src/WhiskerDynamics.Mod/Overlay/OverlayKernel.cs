@@ -968,18 +968,14 @@ public static class OverlayKernel
     }
 
     /// <summary>The planned line has a real plan boundary, unlike the actual future
-    /// line whose orbit window is a floor. A resource- or dynamics-limited actual
-    /// sweep additionally caps planned coverage to the actual line's achieved end so
-    /// a late planned branch cannot float beyond a missing actual reference path.
-    /// Collision cuts are deliberately not coverage limits: a burn before impact may
-    /// produce a valid planned trajectory beyond the actual collision time.</summary>
-    public static double PlannedHorizonSeconds(double actualHorizonSeconds,
-        double planEndSeconds, double actualSampleEndSeconds, bool actualCoverageLimited)
+    /// line whose orbit window is a floor. Actual-line resource limits never cap the
+    /// planned horizon: the planned sweep has its own point budget and dynamics
+    /// detection, and PlannedBranchConnected keeps the branch point on the drawn
+    /// actual line.</summary>
+    public static double PlannedHorizonSeconds(double actualHorizonSeconds, double planEndSeconds)
     {
         double horizon = actualHorizonSeconds;
         if (double.IsFinite(planEndSeconds)) horizon = Math.Min(horizon, planEndSeconds);
-        if (actualCoverageLimited && double.IsFinite(actualSampleEndSeconds))
-            horizon = Math.Min(horizon, actualSampleEndSeconds);
         return horizon;
     }
 
