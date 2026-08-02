@@ -1121,7 +1121,7 @@ public static class BurnPlannerPanel
 
         ImGui.SeparatorText("Plan setup & summary"u8);
         ImGui.TextWrapped($"'{vehicle.Id}' flight plan: {burns.Count} burn(s)");
-        double vesselDv = vehicle.NavBallData.DeltaVInVacuum;
+        double vesselDv = vehicle.NavBallData.DeltaV;
         bool mainPropulsion = plan.PropulsionSource == PropulsionSource.MainEngines;
         bool overBudget = mainPropulsion && PlannerKernel.IsDeltaVOverBudget(totalDv, vesselDv);
         if (overBudget)

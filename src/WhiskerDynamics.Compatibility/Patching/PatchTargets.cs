@@ -340,11 +340,13 @@ internal static class GameplayTargets
         new("FlightComputerInputData.EnumValue", typeof(InputEvents.FlightComputerInputData),
             "EnumValue", MemberKind.Field, null, typeof(Enum), IsStatic: false),
         new("Vehicle.Target", typeof(Vehicle), "Target", MemberKind.Property, null, typeof(IOrbiter), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
-        // Planner delta-v budget: the same stock vacuum figure rendered on the
-        // navball (Vehicle.UpdateNavballData computes ve*ln(total/inert mass)).
+        // Planner delta-v budget: the same stock figure rendered on the
+        // navball (Vehicle.UpdateNavBallData reads the active staging sequence's
+        // performance total, Parts.PerformanceSequences.FindActiveSequenceDeltaV(),
+        // Vehicle.cs:2386).
         new("Vehicle.NavBallData", typeof(Vehicle), "NavBallData", MemberKind.Property,
             null, typeof(NavBallData).MakeByRefType(), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
-        new("NavBallData.DeltaVInVacuum", typeof(NavBallData), "DeltaVInVacuum",
+        new("NavBallData.DeltaV", typeof(NavBallData), "DeltaV",
             MemberKind.Field, null, typeof(double), IsStatic: false),
         // Overlay member touches (registry contract: every game member the mod
         // reads or calls is validated before use).
@@ -420,18 +422,23 @@ internal static class GameplayTargets
             [typeof(SimTime)], typeof(OrbitPointCce)),
 
         // Honest orbit lines: vessel draw-site takeover (VesselLinePatch).
-        // Shapes verified in decompiled sources: FlightPlan.cs:643/63,
-        // Orbit.cs:2077/1250, Camera.cs:213, Double3Ex.cs:15, Vehicle.cs:339/343,
+        // Shapes verified in decompiled sources: FlightPlan.cs:758/74,
+        // Orbit.cs:2266, Camera.cs:213, Double3Ex.cs:15, Vehicle.cs:339/343,
         // Astronomical.cs:391, SimTime.cs:10. InactiveColor's Color.Preset is
         // Brutal.Numerics (Color.cs:8); its implicit byte4 operator (Color.cs:33)
         // carries the (byte4) cast — Brutal primitives are engine-stable, not pinned.
+        // The two AddLineInstances danger params and the DrawLines danger tail
+        // (DangerDisplay, depthPriority, dangerTrackMinTime, dangerColorOverride)
+        // all default; the mod's stale-patch-0 mirror deliberately leaves them at
+        // their defaults, so no DangerDisplay value is compiled into patch IL.
         new("FlightPlan.AddLineInstances", typeof(FlightPlan), "AddLineInstances", MemberKind.Method,
-            [typeof(Viewport), typeof(IOrbiter), typeof(bool), typeof(bool), typeof(TrueAnomaly), typeof(TrueAnomaly)], typeof(void)),
+            [typeof(Viewport), typeof(IOrbiter), typeof(bool), typeof(bool), typeof(TrueAnomaly), typeof(TrueAnomaly),
+             typeof(bool), typeof(bool)], typeof(void)),
         new("FlightPlan.InactiveColor", typeof(FlightPlan), "InactiveColor", MemberKind.Field, null, typeof(Color.Preset), IsStatic: true),
         new("Orbit.DrawLines(color)", typeof(Orbit), "DrawLines", MemberKind.Method,
             [typeof(Viewport), typeof(double3), typeof(SimTime), typeof(byte4),
              typeof(TrueAnomaly), typeof(TrueAnomaly), typeof(bool), typeof(bool), typeof(bool),
-             typeof(bool), typeof(bool), typeof(SimTime?)], typeof(void)),
+             typeof(Orbit.DangerDisplay), typeof(bool), typeof(SimTime?), typeof(byte4?)], typeof(void)),
         new("Camera.GetPositionEgo", typeof(Camera), "GetPositionEgo", MemberKind.Method,
             [typeof(IPosition)], typeof(double3)),
         new("Vehicle.ShowOrbit", typeof(Vehicle), "ShowOrbit", MemberKind.Property, null, typeof(bool).MakeByRefType(), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter), // ref bool, Vehicle.cs:339
@@ -465,8 +472,10 @@ internal static class GameplayTargets
         // vertex append the dense draw feeds — Span parameters, no length limit),
         // Orbit.cs:2243 (IsVisible: the FOV + 5-px cull kept for stock parity),
         // FlightComputer.cs:63/101 (TotalMassPropsBody field, VehicleConfig
-        // property), :19-23 (VehicleConfigInfo engine totals — the executor's own
-        // duration inputs, read by the rocket-equation mirror), MassProperties.cs:9
+        // property), :71-73 (ActiveEngineThrust/ActiveEngineMassFlowRate — the
+        // executor's own duration inputs, refreshed each control tick by
+        // UpdateActiveEnginePerformance :721-735 and read by the rocket-equation
+        // mirror; UpdateBurnTarget consumes them at :750-756), MassProperties.cs:9
         // (Mass field). float3.Pack / double3.IsNaN are Brutal/KSA primitives per
         // the Brutal-stability note above (Double3Ex.NaN is already pinned).
         new("OrbitLinePass.AddLineVertices", typeof(OrbitLinePass), "AddLineVertices", MemberKind.StaticMethod,
@@ -487,10 +496,10 @@ internal static class GameplayTargets
             MemberKind.Field, null, typeof(MassProperties), IsStatic: false),
         new("FlightComputer.VehicleConfig", typeof(FlightComputer), "VehicleConfig",
             MemberKind.Property, null, typeof(FlightComputer.VehicleConfigInfo), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
-        new("VehicleConfigInfo.TotalEngineExhaustVelocity", typeof(FlightComputer.VehicleConfigInfo),
-            "TotalEngineExhaustVelocity", MemberKind.Field, null, typeof(float), IsStatic: false),
-        new("VehicleConfigInfo.TotalEngineVacuumMassFlowRate", typeof(FlightComputer.VehicleConfigInfo),
-            "TotalEngineVacuumMassFlowRate", MemberKind.Field, null, typeof(float), IsStatic: false),
+        new("FlightComputer.ActiveEngineThrust", typeof(FlightComputer),
+            "ActiveEngineThrust", MemberKind.Field, null, typeof(float), IsStatic: false),
+        new("FlightComputer.ActiveEngineMassFlowRate", typeof(FlightComputer),
+            "ActiveEngineMassFlowRate", MemberKind.Field, null, typeof(float), IsStatic: false),
         new("MassProperties.Mass", typeof(MassProperties), "Mass", MemberKind.Field, null, typeof(float), IsStatic: false),
 
         // Forward-RCS finite-plan estimate. The committed state list supplies KSA's
@@ -532,18 +541,20 @@ internal static class GameplayTargets
             MemberKind.Field, null, typeof(float), IsStatic: false),
 
         // Conic marker suppression (PatchMarkerPatch). Shapes
-        // verified in decompiled sources: PatchedConic.cs:910 (single DrawUi
-        // overload; PatchedConic? params erase to PatchedConic at runtime), :80
-        // (EndTransition public field), :100 (HoveredMarker public field);
+        // verified in decompiled sources: PatchedConic.cs:1120 (single DrawUi
+        // overload; PatchedConic? params erase to PatchedConic at runtime; the three
+        // danger/label bools all default), :82
+        // (EndTransition public field), :102 (HoveredMarker public field);
         // Astronomical.cs:15 (Astronomical is a readonly FIELD on the nested readonly
         // struct UiContext); PatchTransition.cs:3 (namespace-level int-backed enum);
-        // FlightPlan.cs:57 (Patches public field). Caller census: Vehicle.cs:2884 (own
-        // plan), BurnPlan.cs:468 (planned burns' plans), TransferPlanner.cs:993/1002
+        // FlightPlan.cs:64 (Patches public field). Caller census: Vehicle.cs:3477 (own
+        // plan), BurnPlan.cs:503 (planned burns' plans), TransferPlanner.cs:991/1000
         // (preview — routed to stock). Burn-scan members (Vehicle.FlightComputer,
         // FlightComputer.BurnPlan, BurnPlan.BurnCount, BurnPlan.TryGetBurn(int,out),
         // Burn.FlightPlan, Vehicle.FlightPlan) are existing entries above.
         new("PatchedConic.DrawUi", typeof(PatchedConic), "DrawUi", MemberKind.Method,
-            [typeof(Viewport), typeof(Astronomical.UiContext), typeof(int), typeof(PatchedConic), typeof(PatchedConic)], typeof(bool)),
+            [typeof(Viewport), typeof(Astronomical.UiContext), typeof(int), typeof(PatchedConic), typeof(PatchedConic),
+             typeof(bool), typeof(bool), typeof(bool)], typeof(bool)),
         new("UiContext.Astronomical", typeof(Astronomical.UiContext), "Astronomical", MemberKind.Field, null, typeof(Astronomical), IsStatic: false),
         new("PatchedConic.EndTransition", typeof(PatchedConic), "EndTransition", MemberKind.Field, null, typeof(PatchTransition), IsStatic: false),
         new("PatchedConic.HoveredMarker", typeof(PatchedConic), "HoveredMarker", MemberKind.Field, null, typeof(bool), IsStatic: false),
@@ -620,8 +631,11 @@ internal static class GameplayTargets
         // Shapes verified in decompiled sources: Orbit.cs:2304 (GetNearestPoint — the
         // ONE hit-test funnel under hover, click, and burn-node drag, prefixed by
         // OrbitHoverPatch; PatchedConic?/OrbitPointCce? erase to their underlying
-        // types at runtime, the out param is a byref Nullable); Camera.cs:383 (the
-        // float2 ScreenToNdc overload) and :324 (EgoToScreen(double3, bool));
+        // types at runtime, the out param is a byref Nullable); Camera.cs:401 (the
+        // float2 ScreenToNdc overload), :342 (EgoToScreen(double3, bool)), :171
+        // (GetForwardEcl — the ego-depth axis stock's own ignore-behind dots
+        // against, :344/:366), :67 (NearPlane property), :272 (EgoToClipDouble —
+        // the hover pruner's independent clip-space bound);
         // Viewport.cs:30 (Size public field); BurnPlan.cs:20 (BurnPatchColor static
         // Color.Preset — the user-configurable BurnLineColor setting,
         // GameSettings.cs:764); Burn.cs:115 (PositionCce computed property
@@ -629,6 +643,11 @@ internal static class GameplayTargets
         new("Orbit.GetNearestPoint", typeof(Orbit), "GetNearestPoint", MemberKind.Method,
             [typeof(Viewport), typeof(float2), typeof(PatchedConic),
              typeof(OrbitPointCce?).MakeByRefType(), typeof(bool), typeof(float)], typeof(bool)),
+        new("Camera.GetForwardEcl", typeof(Camera), "GetForwardEcl", MemberKind.Method,
+            Type.EmptyTypes, typeof(double3)),
+        new("Camera.NearPlane", typeof(Camera), "NearPlane", MemberKind.Property, null, typeof(float), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
+        new("Camera.EgoToClipDouble", typeof(Camera), "EgoToClipDouble", MemberKind.Method,
+            [typeof(double3)], typeof(double4)),
         // Click-to-place suppression (BurnClickPatch): the hover/click channel's one
         // funnel, Orbit.cs:2440 (CelestialPosition? erases to its underlying type at
         // runtime, the out param is a byref Nullable).

@@ -1218,8 +1218,8 @@ public static class TrajectoryOverlay
 
     /// <summary>Finite-burn scalars, one coherent read per rebuild (same surface as
     /// the burn scan): the FC's own totals — TotalMassPropsBody.Mass and the
-    /// VehicleConfig engine sums that the executor's duration formula reads
-    /// (FlightComputer.cs:722-730). Engineless/degenerate values simply fail
+    /// active-engine performance sums that the executor's duration formula reads
+    /// (FlightComputer.cs:750-756). Engineless/degenerate values simply fail
     /// EngineScalars.Usable and the display fold stays impulsive.</summary>
     private static EngineScalars ReadEngineScalars(VehicleUpdateState vehicleState,
         PropulsionSource source) =>
@@ -1227,13 +1227,14 @@ public static class TrajectoryOverlay
 
     /// <summary>THE engine-scalar read (the panel's Rebase capture shares it —
     /// two hand-copied field reads is how a game rename splits the rebuild and
-    /// rebase captures). Torn-read guard: ReadUpdatedVehicleConfiguration publishes
-    /// a fresh VehicleConfigInfo FIRST and only then accumulates the engine totals
-    /// into it (FlightComputer.cs:216-220), so an off-thread read during a staging/
-    /// docking config rebuild can see half-summed totals — and a snapshot capture
-    /// would FREEZE them (a diverged ghost keeps them until Rebase). Two agreeing
-    /// consecutive reads bound that window to ~nothing; a disagreement returns
-    /// default (not Usable): impulsive for this rebuild, corrected on the next.</summary>
+    /// rebase captures). Torn-read guard: each control tick rewrites
+    /// ActiveEngineThrust and then ActiveEngineMassFlowRate as two plain float
+    /// stores (UpdateActiveEnginePerformance, FlightComputer.cs:721-735), so an
+    /// off-thread read can pair a new thrust with an old flow — and a snapshot
+    /// capture would FREEZE that pair (a diverged ghost keeps it until Rebase).
+    /// Two agreeing consecutive reads bound that window to ~nothing; a disagreement
+    /// returns default (not Usable): impulsive for this rebuild, corrected on the
+    /// next.</summary>
     internal static EngineScalars ReadEngineScalars(Vehicle vehicle,
         PropulsionSource source = PropulsionSource.MainEngines)
     {
@@ -1257,11 +1258,13 @@ public static class TrajectoryOverlay
         var flightComputer = vehicle.FlightComputer;
         if (source == PropulsionSource.RcsForward)
             return ReadForwardRcsScalarsOnce(vehicle, flightComputer.TotalMassPropsBody.Mass);
-        var config = flightComputer.VehicleConfig;
+        // The executor's own effective exhaust velocity is thrust/flow
+        // (FlightComputer.cs:752); a zero flow yields a non-Usable NaN/Inf.
+        double flow = flightComputer.ActiveEngineMassFlowRate;
         return new EngineScalars(
             flightComputer.TotalMassPropsBody.Mass,
-            config.TotalEngineExhaustVelocity,
-            config.TotalEngineVacuumMassFlowRate);
+            flightComputer.ActiveEngineThrust / flow,
+            flow);
     }
 
     /// <summary>Vacuum performance of active, fueled RCS controllers mapped to
