@@ -138,6 +138,8 @@ internal static class VesselRailsPatch
                     // the physics environment keys terrain, physics radius and situation
                     // handling off ClosestParent.
                     newStates.SetClosestParent(orbitParent);
+                    if (FlightPlans.TryGet(vehicleState.Id) is not null)
+                        BasisReconversionUrgency.Raise(vehicleState.Id);
                     // GetOrSeed's parent-transition observation logs the landing next
                     // tick; this line records who initiated it. Its own 1 s budget —
                     // sharing LastTransitionLogMs would suppress that landing line.

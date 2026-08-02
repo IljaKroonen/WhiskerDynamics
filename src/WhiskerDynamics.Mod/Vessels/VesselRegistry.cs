@@ -163,6 +163,8 @@ public sealed class VesselRegistry
             tracked.ParentTransitionTick = parentChanged;
             if (parentChanged)
             {
+                if (FlightPlans.TryGet(id) is not null)
+                    BasisReconversionUrgency.Raise(id);
                 // Same 1/s wall budget as the reseed line: guards a pathological
                 // Earth<->Luna plan-flap at warp from spamming the log.
                 if (now - tracked.LastTransitionLogMs >= 1000)

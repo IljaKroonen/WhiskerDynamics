@@ -14,7 +14,8 @@ public class GameTestHostTests
         IReadOnlyDictionary<string, IGameTestScenario> scenarios =
             ScenarioCatalog.Discover();
 
-        Assert.Equal(["moon-transfer"], scenarios.Keys);
+        Assert.Equal(["moon-transfer", "moon-transfer-fast-warp"],
+            scenarios.Keys.OrderBy(id => id, StringComparer.Ordinal));
         Assert.True(scenarios.ContainsKey("MOON-TRANSFER"));
         Assert.Equal("moon-transfer", scenarios["MOON-TRANSFER"].Id);
     }
