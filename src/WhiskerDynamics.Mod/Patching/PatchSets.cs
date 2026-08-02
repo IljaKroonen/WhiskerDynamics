@@ -57,6 +57,7 @@ internal static class GameplayPatchSet
         typeof(Patches.BurnNodePatch),
         typeof(Patches.BurnGizmoPatch),
         typeof(Patches.BurnClickPatch),
+        typeof(Patches.KittenRemovalPatch),
     ]);
 
     internal static PatchSetDefinition Create() => new(
