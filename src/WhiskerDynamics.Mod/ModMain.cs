@@ -169,7 +169,7 @@ public static class ModMain
                     || vehicle.Orbit?.Parent is not KSA.Astronomical parentBody)
                     return [];
                 // Sample parent and vessel at the committed state's own epoch: at high
-                // warp GetElapsedSimTime leads StateTime by up to a tick (~1667 s at
+                // warp GetElapsedTime leads StateTime by up to a tick (~1667 s at
                 // 1e5x), which alone would displace the parent by ~5e7 m.
                 double t = vehicle.Orbit.StateVectors.StateTime.Seconds();
                 if (!rails.TryGetAbsolute(parentBody.Id, t, out var parentAbs)) return [];
@@ -231,7 +231,7 @@ public static class ModMain
                 _plannerDrillFired = true;
                 var dv = PlannerKernel.ComposeVlf(
                     drill.Prograde, drill.Normal, drill.Outward);
-                double now = KSA.Universe.GetElapsedSimTime().Seconds();
+                double now = KSA.Universe.GetElapsedTime().Seconds();
                 string result = BurnPlanWriter.TryAdd(vehicle, now + drill.OffsetSeconds, dv);
                 _plannerDrillStatus = $"planner drill: TryAdd at now+{drill.OffsetSeconds:F0} s -> {result}";
                 ModLog.Info(_plannerDrillStatus);

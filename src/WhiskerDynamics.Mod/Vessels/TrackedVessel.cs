@@ -379,7 +379,7 @@ public sealed class TrackedVessel
     /// Id means the original is gone — the stale-Id guard reseeds instead of staging.</summary>
     private WeakReference<Vehicle>? _vehicle;
 
-    /// <summary>The last task state that staged this vessel. VehicleUpdateTask owns
+    /// <summary>The last task state that staged this vessel. PhysicsBubble owns
     /// these objects for the life of the live vessel; retaining the latest reference
     /// lets the render-frame pause seam request the exact same overlay capture that a
     /// simulation tick would have requested. It is never mutated here.</summary>
@@ -561,7 +561,7 @@ public sealed class TrackedVessel
     /// StateVectors the stock staging path expects (parent-relative Cci). TrueAnomaly is
     /// reused from the orbit's cached state — cosmetic; refreshed by the
     /// re-osculation refresh.</summary>
-    public StateVectors EvaluateGameState(Orbit currentOrbit, SimTime time)
+    public StateVectors EvaluateGameState(Orbit currentOrbit, UniverseTime time)
     {
         if (currentOrbit.Parent is not Astronomical parentBody)
             throw new InvalidOperationException($"orbit parent of '{Id}' is not an Astronomical");
@@ -572,13 +572,13 @@ public sealed class TrackedVessel
     /// the rails-geometric re-parent's staging read, where the vessel's orbit still
     /// names the OLD parent. TrueAnomaly is caller-supplied (cosmetic; the re-parent's
     /// SetCurrentOrbit re-derives it immediately).</summary>
-    public StateVectors EvaluateGameStateAgainst(Astronomical parentBody, SimTime time, TrueAnomaly trueAnomaly)
+    public StateVectors EvaluateGameStateAgainst(Astronomical parentBody, UniverseTime time, TrueAnomaly trueAnomaly)
         => EvaluateCore(Predictor, parentBody, time, trueAnomaly);
 
     /// <summary>Like <see cref="EvaluateGameState"/> but reading from an arbitrary
     /// predictor — the overlay's display clone with plan burns applied (the
     /// authoritative <see cref="Predictor"/> must never see plan burns).</summary>
-    public StateVectors EvaluateGameStateFrom(TrajectoryPredictor predictor, Orbit currentOrbit, SimTime time)
+    public StateVectors EvaluateGameStateFrom(TrajectoryPredictor predictor, Orbit currentOrbit, UniverseTime time)
     {
         if (currentOrbit.Parent is not Astronomical parentBody)
             throw new InvalidOperationException($"orbit parent of '{Id}' is not an Astronomical");
@@ -588,7 +588,7 @@ public sealed class TrackedVessel
     /// <summary>THE predictor-absolute -> game parent-relative Cci staging read, shared
     /// by every Evaluate* flavor above so the conversion cannot drift between them.</summary>
     private StateVectors EvaluateCore(TrajectoryPredictor predictor, Astronomical parentBody,
-        SimTime time, TrueAnomaly trueAnomaly)
+        UniverseTime time, TrueAnomaly trueAnomaly)
     {
         if (parentBody is not IParentBody parent)
             throw new InvalidOperationException($"'{parentBody.Id}' is not an IParentBody");

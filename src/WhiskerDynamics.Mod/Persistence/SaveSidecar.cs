@@ -156,7 +156,7 @@ public sealed class SidecarPendingRendezvous
 /// the parent-vs-label caveat.</summary>
 public static class SaveSidecar
 {
-    // KSA writes SimTime seconds with four decimal places. The sidecar intentionally
+    // KSA writes UniverseTime seconds with four decimal places. The sidecar intentionally
     // retains full precision, so its capture can be up to 50 microseconds later than
     // the same stock save's restored epoch.
     internal const double StockTimeSerializationToleranceSeconds = 1e-3;

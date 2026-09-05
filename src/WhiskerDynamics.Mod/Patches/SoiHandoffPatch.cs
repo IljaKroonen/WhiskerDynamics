@@ -7,13 +7,13 @@ namespace WhiskerDynamics.Mod.Patches;
 
 /// <summary>SOI handoff seam: prefix+postfix on the one funnel that mirrors a live
 /// vessel's kinematic state into its analytic state (CurrentOrbit / committed
-/// StateVectors) — decompiled VehicleUpdateTask.cs:1292, called from the pre-step loop
+/// StateVectors) — decompiled PhysicsBubble.cs:1292, called from the pre-step loop
 /// (:621), the end-of-tick mirror (:739) and immediately after each live SOI
 /// transition (the CheckSoiTransitions call sites, :816 constrained and :884
 /// unconstrained). When that mirror crosses parent frames (Origin.Parent !=
 /// Environment.ClosestParent), stock converts through Orbit.CciToCci
-/// (VehicleUpdateTask.cs:1301), whose parent-chain positions are ANALYTIC KEPLER
-/// evaluations (Orbit.cs:1556-1563 ConvertUp -> Celestial.GetPositionCci(SimTime),
+/// (PhysicsBubble.cs:1301), whose parent-chain positions are ANALYTIC KEPLER
+/// evaluations (Orbit.cs:1556-1563 ConvertUp -> Celestial.GetPositionCci(UniverseTime),
 /// Celestial.cs:481/429) — but under Seam 3 every modeled body FLIES a numerical
 /// rail, so the converted state is wrong by exactly the modeled parents'
 /// Kepler-vs-rails divergence (megameters within days, growing secularly): a
@@ -25,14 +25,14 @@ namespace WhiskerDynamics.Mod.Patches;
 ///
 /// Two gates keep the correction exactly on stock's own conversion:
 /// - The prefix snapshots stock's freshness guard (populate runs only when
-///   CurrentStateVectors.StateTime &lt; kinematic time, VehicleUpdateTask.cs:1295) —
+///   CurrentStateVectors.StateTime &lt; kinematic time, PhysicsBubble.cs:1295) —
 ///   a postfix-side inference from the post-state cannot distinguish "stock populated
 ///   this call" from "already fresh, skipped" and would clobber predictor-staged
 ///   overrides in multi-vehicle tasks.
 /// - On-rails situations are skipped (SituationEx.cs:60: the situation's rails bit):
 ///   an on-rails member of a full-physics task has kinematics FORWARD-derived from its
 ///   analytic state through the same Kepler map (ApplyFreefallMotion staging,
-///   VehicleUpdateTask.cs:845-871), so stock's Kepler mirror-back is its exact inverse
+///   PhysicsBubble.cs:845-871), so stock's Kepler mirror-back is its exact inverse
 ///   and a rails re-conversion would INJECT the divergence instead of removing it.
 ///   Only Bepu-integrated kinematics (rails bit clear) are independent truth worth
 ///   re-anchoring.
@@ -41,9 +41,9 @@ namespace WhiskerDynamics.Mod.Patches;
 /// missing modeled state, or mismatched staged parent is a global authority fault;
 /// none may retain stock's cross-parent conversion. The attitude chain is left alone:
 /// NewBody2Cce composes only constant per-body rotation quats
-/// (VehicleUpdateTask.cs:1302/1306 via Orbit.cs:1559-1560 GetCci2ParentCci), which
+/// (PhysicsBubble.cs:1302/1306 via Orbit.cs:1559-1560 GetCci2ParentCci), which
 /// carry no positional drift.</summary>
-[HarmonyPatch(typeof(VehicleUpdateTask), "PopulateAnalyticStatesFromKinematicStates")]
+[HarmonyPatch(typeof(PhysicsBubble), "PopulateAnalyticStatesFromKinematicStates")]
 internal static class SoiHandoffPatch
 {
     // One-shot + 30 s-throttled correction lines: whiskerdynamics.log is the only observable
@@ -55,7 +55,7 @@ internal static class SoiHandoffPatch
     /// <summary>Statics sweep: re-arm the one-shot path-evidence line.</summary>
     internal static void ResetSessionStatics() => System.Threading.Volatile.Write(ref _pathLogged, 0);
 
-    /// <summary>Snapshot of stock's own populate guard (VehicleUpdateTask.cs:1295),
+    /// <summary>Snapshot of stock's own populate guard (PhysicsBubble.cs:1295),
     /// taken before the body runs. Never throws: a prefix exception would propagate
     /// into the stock method.</summary>
     static bool Prefix(VehicleUpdateState vehicleState, out bool __state)
@@ -65,7 +65,7 @@ internal static class SoiHandoffPatch
         try
         {
             var states = vehicleState.GetReadOnlyStates();
-            // SimTime wraps a seconds double (SimTime.cs:6-8) — Seconds() comparison
+            // UniverseTime wraps a seconds double (UniverseTime.cs:6-8) — Seconds() comparison
             // is exactly stock's operator comparison.
             __state = vehicleState.CurrentStateVectors.StateTime.Seconds() < states.Time.Seconds();
             return true;

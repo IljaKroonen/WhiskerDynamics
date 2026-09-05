@@ -34,13 +34,13 @@ internal static class SoiIndicatorPatch
 
     internal static void ResetSessionStatics() => System.Threading.Volatile.Write(ref _activeLogged, 0);
 
-    static void Prefix(GizmoParent __instance, Viewport viewport, int passIndex)
+    static void Prefix(GizmoParent __instance, IViewport viewport, int passIndex)
     {
         try
         {
             var rails = ModServices.Rails;
             bool ready = rails is not null
-                && rails.IsReadyAt(Universe.GetElapsedSimTime().Seconds());
+                && rails.IsReadyAt(Universe.GetElapsedTime().Seconds());
             if (!OverlayKernel.SoiIndicatorsHidden(ModServices.Enabled, rails is not null, ready))
                 return; // unbound/disabled: stock propagation, truthful indicator — stock draws
             if (__instance.RenderData is not GlassBallGizmoRenderData) return;

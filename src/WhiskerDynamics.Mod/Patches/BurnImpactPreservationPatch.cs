@@ -6,7 +6,7 @@ namespace WhiskerDynamics.Mod.Patches;
 internal static class BurnPlanCalculationContext
 {
     [ThreadStatic] private static int _depth;
-    [ThreadStatic] private static SimTime _currentTime;
+    [ThreadStatic] private static UniverseTime _currentTime;
 
     /// <summary>Wall-clock throttle so a persistent game-read fault (one contained
     /// error per recalculation per vessel) cannot flood the log.</summary>
@@ -18,9 +18,9 @@ internal static class BurnPlanCalculationContext
     /// committed state epoch, not the elapsed clock: at high warp the elapsed clock
     /// leads by up to a tick, which would let stock delete a preserved node while the
     /// vessel is still warping toward ignition.</summary>
-    internal static SimTime CurrentTime => _currentTime;
+    internal static UniverseTime CurrentTime => _currentTime;
 
-    internal readonly record struct Scope(bool Entered, SimTime PreviousCurrentTime)
+    internal readonly record struct Scope(bool Entered, UniverseTime PreviousCurrentTime)
         : IDisposable
     {
         public void Dispose() => Exit(this);
@@ -43,7 +43,7 @@ internal static class BurnPlanCalculationContext
             if (tracked is not null && !tracked.IsSameVehicle(vehicle))
                 return default;
             return Enter(vehicle.Orbit?.StateVectors.StateTime
-                ?? Universe.GetElapsedSimTime());
+                ?? Universe.GetElapsedTime());
         }
         catch (Exception e)
         {
@@ -80,9 +80,9 @@ internal static class BurnPlanCalculationContext
     /// registry is still empty), so this gate is Enabled alone. KSA restores elapsed
     /// time before burn plans deserialize, so the elapsed clock is correct here.</summary>
     internal static Scope EnterForDeserialize() =>
-        ModServices.Enabled ? Enter(Universe.GetElapsedSimTime()) : default;
+        ModServices.Enabled ? Enter(Universe.GetElapsedTime()) : default;
 
-    private static Scope Enter(SimTime currentTime)
+    private static Scope Enter(UniverseTime currentTime)
     {
         var scope = new Scope(true, _currentTime);
         _depth++;
@@ -103,9 +103,9 @@ internal static class BurnPlanCalculationContext
     /// spent nodes alive past stock's cleanup.</summary>
     internal static bool ShouldExtendPastImpact(
         PatchTransition lastTransition,
-        SimTime lastEndTime,
-        SimTime requestedTime,
-        SimTime currentTime) =>
+        UniverseTime lastEndTime,
+        UniverseTime requestedTime,
+        UniverseTime currentTime) =>
         lastTransition == PatchTransition.Impact
         && requestedTime > lastEndTime
         && requestedTime > currentTime;
@@ -146,7 +146,7 @@ internal static class BurnPlanDeserializeScopePatch
 [HarmonyPatch(typeof(FlightPlan), nameof(FlightPlan.TryFindPatch))]
 internal static class BurnImpactPreservationPatch
 {
-    static void Postfix(FlightPlan __instance, SimTime time,
+    static void Postfix(FlightPlan __instance, UniverseTime time,
         ref PatchedConic? __result)
     {
         if (__result is not null || !BurnPlanCalculationContext.Active) return;

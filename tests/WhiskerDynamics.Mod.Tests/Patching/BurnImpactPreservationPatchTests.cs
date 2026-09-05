@@ -10,9 +10,9 @@ public class BurnImpactPreservationPatchTests
     {
         Assert.True(BurnPlanCalculationContext.ShouldExtendPastImpact(
             PatchTransition.Impact,
-            lastEndTime: new SimTime(100),
-            requestedTime: new SimTime(200),
-            currentTime: new SimTime(50)));
+            lastEndTime: new UniverseTime(100),
+            requestedTime: new UniverseTime(200),
+            currentTime: new UniverseTime(50)));
     }
 
     [Theory]
@@ -27,8 +27,8 @@ public class BurnImpactPreservationPatchTests
     {
         Assert.False(BurnPlanCalculationContext.ShouldExtendPastImpact(
             transition,
-            new SimTime(endTime),
-            new SimTime(requestedTime),
-            new SimTime(currentTime)));
+            new UniverseTime(endTime),
+            new UniverseTime(requestedTime),
+            new UniverseTime(currentTime)));
     }
 }

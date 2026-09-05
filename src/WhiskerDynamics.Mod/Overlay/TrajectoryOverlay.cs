@@ -30,7 +30,7 @@ namespace WhiskerDynamics.Mod.Overlay;
 /// pad-to-2000 invariant makes an e&gt;=1 write gate unnecessary. Writing the cache
 /// from an update task matches stock precedent:
 /// RecalculateFlightPlan / RecalculateBurnPlan regenerate cached points inside
-/// VehicleUpdateTask.Run (VehicleUpdateState.cs:365/379). Failures are contained
+/// PhysicsBubble.Run (VehicleUpdateState.cs:365/379). Failures are contained
 /// LOCALLY (warn + panel note): a display overlay must never book a vessel containment,
 /// let alone throw into the game.</summary>
 public static class TrajectoryOverlay
@@ -338,14 +338,14 @@ public static class TrajectoryOverlay
     /// and keeps drawing) it restores exact new-parent payload semantics
     /// (parent-relative Cce and the conic-anchored TimeSincePe identity) within
     /// the same tick.</summary>
-    public static void MaybeRebuild(VehicleUpdateState vehicleState, TrackedVessel tracked, SimTime now)
+    public static void MaybeRebuild(VehicleUpdateState vehicleState, TrackedVessel tracked, UniverseTime now)
     {
         lock (tracked.OverlayCaptureGate)
             MaybeRebuildOnRailsCore(vehicleState, tracked, now);
     }
 
     private static void MaybeRebuildOnRailsCore(
-        VehicleUpdateState vehicleState, TrackedVessel tracked, SimTime now)
+        VehicleUpdateState vehicleState, TrackedVessel tracked, UniverseTime now)
     {
         bool reserved = false;
         OverlayBuffer.RebuildLease? activeLease = null;
@@ -362,7 +362,7 @@ public static class TrajectoryOverlay
             if (currentOrbit.Parent is not Astronomical parentBody) return;
 
             long nowMs = Environment.TickCount64;
-            double captureSimSeconds = Universe.GetElapsedSimTime().Seconds();
+            double captureSimSeconds = Universe.GetElapsedTime().Seconds();
             // Context-aware throttle: when the last published batch
             // is still FRESH but was sampled against a context that no longer holds,
             // the rebuild runs immediately instead of waiting out the throttle. Frame
@@ -626,7 +626,7 @@ public static class TrajectoryOverlay
     /// <see cref="MaybeRebuild"/> never runs and batches would otherwise age out (a
     /// mid-burn map blackout). Publishes a FRESH actual batch from the vessel's LIVE committed
     /// state (repopulated from kinematics at the end of every full-physics tick —
-    /// VehicleUpdateTask.cs:737-740/1292-1308). Full-window rebuilds run continuously:
+    /// PhysicsBubble.cs:737-740/1292-1308). Full-window rebuilds run continuously:
     /// the active build finishes and publishes while newer captures coalesce into the
     /// next build. The line, hover, markers and burn nodes therefore stay alive
     /// mid-burn — in frame views too (poses come from the rails, which never pause).
@@ -664,7 +664,7 @@ public static class TrajectoryOverlay
             if (!tracked.Rails.IsModeled(parentBody.Id)) return;
 
             long nowMs = Environment.TickCount64;
-            double captureSimSeconds = Universe.GetElapsedSimTime().Seconds();
+            double captureSimSeconds = Universe.GetElapsedTime().Seconds();
             var config = ModServices.Config;
             var sv = vehicleState.CurrentStateVectors; // live post-physics state
             double t0 = sv.StateTime.Seconds();
@@ -860,7 +860,7 @@ public static class TrajectoryOverlay
                 // only malformed/future captures; generation, ticket, and predictor
                 // lineage gates below reject genuinely obsolete work.
                 bool CaptureEpochValid() => OverlayKernel.CaptureEpochValid(
-                    CaptureSimSeconds, Universe.GetElapsedSimTime().Seconds());
+                    CaptureSimSeconds, Universe.GetElapsedTime().Seconds());
                 bool LineageUsable() =>
                     ModServices.IsBindingCurrent(BindingGeneration, Tracked.Rails)
                     && Tracked.IsOverlayLineageCurrent(OverlayLineage, AuthorityLineage);
@@ -1225,16 +1225,9 @@ public static class TrajectoryOverlay
         PropulsionSource source) =>
         ReadEngineScalars(vehicleState.ReadOnlyVehicle, source);
 
-    /// <summary>THE engine-scalar read (the panel's Rebase capture shares it —
-    /// two hand-copied field reads is how a game rename splits the rebuild and
-    /// rebase captures). Torn-read guard: each control tick rewrites
-    /// ActiveEngineThrust and then ActiveEngineMassFlowRate as two plain float
-    /// stores (UpdateActiveEnginePerformance, FlightComputer.cs:721-735), so an
-    /// off-thread read can pair a new thrust with an old flow — and a snapshot
-    /// capture would FREEZE that pair (a diverged ghost keeps it until Rebase).
-    /// Two agreeing consecutive reads bound that window to ~nothing; a disagreement
-    /// returns default (not Usable): impulsive for this rebuild, corrected on the
-    /// next.</summary>
+    /// <summary>The panel and prediction workers use this engine-performance read.
+    /// The game can replace ActiveEnginePerformanceMax during a read.
+    /// If two reads differ, use the impulsive model until the next capture.</summary>
     internal static EngineScalars ReadEngineScalars(Vehicle vehicle,
         PropulsionSource source = PropulsionSource.MainEngines)
     {
@@ -1260,10 +1253,11 @@ public static class TrajectoryOverlay
             return ReadForwardRcsScalarsOnce(vehicle, flightComputer.TotalMassPropsBody.Mass);
         // The executor's own effective exhaust velocity is thrust/flow
         // (FlightComputer.cs:752); a zero flow yields a non-Usable NaN/Inf.
-        double flow = flightComputer.ActiveEngineMassFlowRate;
+        var performance = flightComputer.ActiveEnginePerformanceMax;
+        double flow = performance.MassFlowRate;
         return new EngineScalars(
             flightComputer.TotalMassPropsBody.Mass,
-            flightComputer.ActiveEngineThrust / flow,
+            performance.Thrust / flow,
             flow);
     }
 
@@ -2852,7 +2846,7 @@ public static class TrajectoryOverlay
         if (!string.Equals(anchorParentId, samples.ParentId, StringComparison.Ordinal)
             && ModServices.Rails is { } shiftRails)
         {
-            double tShift = Universe.GetElapsedSimTime().Seconds();
+            double tShift = Universe.GetElapsedTime().Seconds();
             var (batchParent, nowParent) = shiftRails.GetGameEclPair(samples.ParentId, anchorParentId, tShift);
             parentShift = OverlayKernel.ParentShift(batchParent.Position, nowParent.Position);
         }
@@ -2879,7 +2873,7 @@ public static class TrajectoryOverlay
         {
             try
             {
-                double tNow = Universe.GetElapsedSimTime().Seconds();
+                double tNow = Universe.GetElapsedTime().Seconds();
                 if (FrameManager.TrySamplePoseForDisplay(frameSnapshot, tNow, out nowPose))
                 {
                     // Anchor at the CURRENT orbit parent (SOI-independence): stock adds
@@ -2923,8 +2917,8 @@ public static class TrajectoryOverlay
     /// OrbitPointCce the map draws under <paramref name="ctx"/>.</summary>
     internal static OrbitPointCce StagedPoint(OverlaySamples samples, in StagingContext ctx, int i) =>
         new(FrameAdapter.ToGame(DrawnCce(samples, in ctx, i)),
-            new SimTime(PayloadTimeSincePe(samples, in ctx, i)),
-            new SimTime(samples.RemainingTimesTo[i]),
+            new UniverseTime(PayloadTimeSincePe(samples, in ctx, i)),
+            new UniverseTime(samples.RemainingTimesTo[i]),
             TrueAnomaly.NaN);
 
     /// <summary>Builds the game's point buffer from a sample batch and hands it to
@@ -2936,7 +2930,7 @@ public static class TrajectoryOverlay
     /// A pure function of the immutable batch, so
     /// re-staging the same batch within a frame is idempotent by construction (the
     /// frame path re-reads the current pose per call, so within-frame repeats still agree
-    /// to the pose sampled at one Universe time — GetElapsedSimTime is frame-constant).
+    /// to the pose sampled at one Universe time — GetElapsedTime is frame-constant).
     /// Ordinary fallible context work happens before the buffer exists. A session reset
     /// that wins after allocation rejects the generation and disposes the still-owned
     /// buffer; after UpdateCachedPoints begins, Orbit owns it. <paramref name="reanchorTimes"/>: see
@@ -2960,7 +2954,7 @@ public static class TrajectoryOverlay
                 cache.ActualCacheModOwned = observation.ActualCacheModOwned;
             }
 
-            double simSeconds = Universe.GetElapsedSimTime().Seconds();
+            double simSeconds = Universe.GetElapsedTime().Seconds();
             string? parentId = (orbit.Parent as Astronomical)?.Id;
             string? frameLabel = FrameManager.Active?.Label;
             double anchorPe = reanchorTimes ? orbit.TimeAtPeriapsis.Seconds() : double.NaN;
@@ -3333,14 +3327,14 @@ public static class TrajectoryOverlay
         if (!OverlayKernel.ModeMatches(samples.FrameLabel, frameLabel)) return false;
         if (samples.DenseFrameCoordinates is not null && framed)
         {
-            double tNow = Universe.GetElapsedSimTime().Seconds();
+            double tNow = Universe.GetElapsedTime().Seconds();
             if (!FrameManager.TrySamplePoseForDisplay(frameSnapshot, tNow, out var pose))
                 return false;
             context = new MarkerDrawContext(true, pose, default);
             return true;
         }
         context = new MarkerDrawContext(false, default,
-            rails.GetGameEcl(samples.ParentId, Universe.GetElapsedSimTime().Seconds()).Position);
+            rails.GetGameEcl(samples.ParentId, Universe.GetElapsedTime().Seconds()).Position);
         return true;
     }
 

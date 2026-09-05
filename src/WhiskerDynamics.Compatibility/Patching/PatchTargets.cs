@@ -47,17 +47,17 @@ internal static class GameplayTargets
         new("Orbit.StateVectors", typeof(Orbit), "StateVectors", MemberKind.Property, null, typeof(StateVectors).MakeByRefType(), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
 
         // Seam 1: vessel on-rails (the non-inline-marked callers)
-        new("VehicleUpdateTask.ApplySingleVehicleMotion", typeof(VehicleUpdateTask), "ApplySingleVehicleMotion", MemberKind.Method,
+        new("PhysicsBubble.ApplySingleVehicleMotion", typeof(PhysicsBubble), "ApplySingleVehicleMotion", MemberKind.Method,
             [typeof(VehicleUpdateState)], typeof(void)),
-        new("VehicleUpdateTask.FullPhysicsUnconstrainedStep", typeof(VehicleUpdateTask), "FullPhysicsUnconstrainedStep", MemberKind.Method,
+        new("PhysicsBubble.FullPhysicsUnconstrainedStep", typeof(PhysicsBubble), "FullPhysicsUnconstrainedStep", MemberKind.Method,
             [typeof(PhysicsContext).MakeByRefType(), typeof(SimStep).MakeByRefType()], typeof(void)),
-        new("VehicleUpdateTask._vehicleStates", typeof(VehicleUpdateTask), "_vehicleStates", MemberKind.Field, null, typeof(List<VehicleUpdateState>), IsStatic: false),
-        new("VehicleUpdateTask.SimStep", typeof(VehicleUpdateTask), "SimStep", MemberKind.Field, null, typeof(SimStep), IsStatic: false),
-        new("VehicleUpdateTask.Origin", typeof(VehicleUpdateTask), "Origin", MemberKind.Field, null, typeof(BubbleOrigin), IsStatic: false),
-        new("VehicleUpdateTask.OriginOrbit", typeof(VehicleUpdateTask), "OriginOrbit", MemberKind.Field, null, typeof(Orbit), IsStatic: false),
-        new("Vehicle.UpdateFromTaskResults", typeof(Vehicle), "UpdateFromTaskResults", MemberKind.Method,
+        new("PhysicsBubble._vehicleStates", typeof(PhysicsBubble), "_vehicleStates", MemberKind.Field, null, typeof(List<VehicleUpdateState>), IsStatic: false),
+        new("PhysicsBubble.SimStep", typeof(PhysicsBubble), "SimStep", MemberKind.Field, null, typeof(SimStep), IsStatic: false),
+        new("PhysicsBubble.Origin", typeof(PhysicsBubble), "Origin", MemberKind.Field, null, typeof(BubbleOrigin), IsStatic: false),
+        new("PhysicsBubble.OriginOrbit", typeof(PhysicsBubble), "OriginOrbit", MemberKind.Field, null, typeof(Orbit), IsStatic: false),
+        new("Vehicle.UpdateFromTaskResultsUnsynchronized", typeof(Vehicle), "UpdateFromTaskResultsUnsynchronized", MemberKind.Method,
             [typeof(VehicleUpdateData).MakeByRefType(), typeof(BubbleOrigin).MakeByRefType(), typeof(Vehicle),
-             typeof(ReadOnlySpan<Vehicle>), typeof(double3), typeof(double3)], typeof(void)),
+             typeof(ReadOnlySpan<Vehicle>)], typeof(void)),
 
         // Seam 1 staging surfaces (vessel orbital state storage)
         new("VehicleUpdateState.UpdateData", typeof(VehicleUpdateState), "UpdateData", MemberKind.Field, null, typeof(VehicleUpdateData), IsStatic: false),
@@ -71,14 +71,14 @@ internal static class GameplayTargets
             [typeof(Orbit), typeof(StateVectors).MakeByRefType(), typeof(doubleQuat), typeof(double3), typeof(Situation)], typeof(void)),
         new("Orbit.UpdatePosition", typeof(Orbit), "UpdatePosition", MemberKind.Method, [typeof(StateVectors)], typeof(void)),
         new("Orbit.CreateFromStateCci", typeof(Orbit), "CreateFromStateCci", MemberKind.StaticMethod,
-            [typeof(IParentBody), typeof(SimTime), typeof(double3), typeof(double3), typeof(byte4)], typeof(Orbit)), // the mod calls it: full signature pinned
+            [typeof(IParentBody), typeof(UniverseTime), typeof(double3), typeof(double3), typeof(byte4)], typeof(Orbit)), // the mod calls it: full signature pinned
         new("Orbit.OrbitLineColor", typeof(Orbit), "OrbitLineColor", MemberKind.Field, null, typeof(byte4), IsStatic: false),
         new("BubbleOrigin.CreateFrom(parent,sv)", typeof(BubbleOrigin), "CreateFrom", MemberKind.StaticMethod,
             [typeof(IParentBody), typeof(StateVectors).MakeByRefType()], typeof(BubbleOrigin)),
 
         // Seam 1 patch-body member touches (registry contract: every game member the
         // patch bodies read or write is validated before use — including Orbit.Parent,
-        // GetCce2Cci, the StateVectors ctor/fields, SimTime.Seconds).
+        // GetCce2Cci, the StateVectors ctor/fields, UniverseTime.Seconds).
         new("VehicleUpdateState.ReadOnlyVehicle", typeof(VehicleUpdateState), "ReadOnlyVehicle", MemberKind.Field, null, typeof(Vehicle), IsStatic: false),
         new("VehicleUpdateState.Id", typeof(VehicleUpdateState), "Id", MemberKind.Property, null, typeof(string), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("VehicleUpdateState.CurrentStateVectors", typeof(VehicleUpdateState), "CurrentStateVectors", MemberKind.Property, null, typeof(StateVectors).MakeByRefType(), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
@@ -97,14 +97,14 @@ internal static class GameplayTargets
         new("IParentBody.GetCci2Cce", typeof(IParentBody), "GetCci2Cce", MemberKind.Method, Type.EmptyTypes, typeof(doubleQuat)),
         new("FlightPlan.FirstPatch", typeof(FlightPlan), "FirstPatch", MemberKind.Property, null, typeof(PatchedConic), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("PatchedConic.Orbit", typeof(PatchedConic), "Orbit", MemberKind.Field, null, typeof(Orbit), IsStatic: false),
-        new("SimStep.PreviousTime", typeof(SimStep), "PreviousTime", MemberKind.Property, null, typeof(SimTime), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
-        new("SimStep.NextTime", typeof(SimStep), "NextTime", MemberKind.Property, null, typeof(SimTime), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
+        new("SimStep.PreviousTime", typeof(SimStep), "PreviousTime", MemberKind.Property, null, typeof(UniverseTime), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
+        new("SimStep.NextTime", typeof(SimStep), "NextTime", MemberKind.Property, null, typeof(UniverseTime), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("SimStep.DeltaTime", typeof(SimStep), "DeltaTime", MemberKind.Property, null, typeof(double), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
-        new("SimTime.Seconds()", typeof(SimTime), "Seconds", MemberKind.Method, Type.EmptyTypes, typeof(double)),
-        new("BubbleOrigin.Time", typeof(BubbleOrigin), "Time", MemberKind.Field, null, typeof(SimTime), IsStatic: false),
+        new("UniverseTime.Seconds()", typeof(UniverseTime), "Seconds", MemberKind.Method, Type.EmptyTypes, typeof(double)),
+        new("BubbleOrigin.Time", typeof(BubbleOrigin), "Time", MemberKind.Field, null, typeof(UniverseTime), IsStatic: false),
         new("StateVectors..ctor(t,p,v,ta)", typeof(StateVectors), ".ctor", MemberKind.Constructor,
-            [typeof(SimTime), typeof(double3), typeof(double3), typeof(TrueAnomaly)]),
-        new("StateVectors.StateTime", typeof(StateVectors), "StateTime", MemberKind.Field, null, typeof(SimTime), IsStatic: false),
+            [typeof(UniverseTime), typeof(double3), typeof(double3), typeof(TrueAnomaly)]),
+        new("StateVectors.StateTime", typeof(StateVectors), "StateTime", MemberKind.Field, null, typeof(UniverseTime), IsStatic: false),
         new("StateVectors.PositionCci", typeof(StateVectors), "PositionCci", MemberKind.Field, null, typeof(double3), IsStatic: false),
         new("StateVectors.VelocityCci", typeof(StateVectors), "VelocityCci", MemberKind.Field, null, typeof(double3), IsStatic: false),
         new("StateVectors.TrueAnomaly", typeof(StateVectors), "TrueAnomaly", MemberKind.Field, null, typeof(TrueAnomaly), IsStatic: false),
@@ -113,7 +113,7 @@ internal static class GameplayTargets
         new("PhysicsStates.ComputeDerivatives(static)", typeof(PhysicsStates), "ComputeDerivatives", MemberKind.StaticMethod,
             [typeof(BubbleOrigin).MakeByRefType(), typeof(KinematicStates).MakeByRefType(), typeof(VehicleProperties).MakeByRefType(),
              typeof(PhysicsEnvironment).MakeByRefType(), typeof(double), typeof(double), typeof(double3), typeof(double3),
-             typeof(ReadOnlySpan<ActiveNozzle>)], typeof(Disturbances)),
+             typeof(ReadOnlySpan<ActiveNozzle>), typeof(ReadOnlySpan<ActiveChute>)], typeof(Disturbances)),
         new("PhysicsStates.GetPositionClosestParentBub(static)", typeof(PhysicsStates), "GetPositionClosestParentBub", MemberKind.StaticMethod,
             [typeof(BubbleOrigin).MakeByRefType(), typeof(PhysicsEnvironment).MakeByRefType(), typeof(double3)], typeof(double3)),
         new("Disturbances.AddAccelPhys", typeof(Disturbances), "AddAccelPhys", MemberKind.Method, [typeof(double3)], typeof(void)),
@@ -122,13 +122,13 @@ internal static class GameplayTargets
         new("KinematicStates.PositionPhys", typeof(KinematicStates), "PositionPhys", MemberKind.Field, null, typeof(double3), IsStatic: false),
 
         // SOI seams: the live handoff funnel (SoiHandoffPatch re-anchors cross-parent
-        // analytic mirrors to rails; VehicleUpdateTask.cs:1292) and the rails-geometric
+        // analytic mirrors to rails; PhysicsBubble.cs:1292) and the rails-geometric
         // re-parent surfaces (VesselRegistry.RailsSoiParent mirrors stock's
         // CheckSoiTransitions candidate rules, PhysicsStates.cs:487-519; the re-parent
         // mirrors stock's own rails patch transition SetClosestParent,
-        // VehicleUpdateTask.cs:856). ReadOnlyPhysicsStates fields are ref fields
+        // PhysicsBubble.cs:856). ReadOnlyPhysicsStates fields are ref fields
         // (ReadOnlyPhysicsStates.cs:9-15) — byref-typed like the byref properties above.
-        new("VehicleUpdateTask.PopulateAnalyticStatesFromKinematicStates", typeof(VehicleUpdateTask),
+        new("PhysicsBubble.PopulateAnalyticStatesFromKinematicStates", typeof(PhysicsBubble),
             "PopulateAnalyticStatesFromKinematicStates", MemberKind.StaticMethod,
             [typeof(VehicleUpdateState), typeof(bool)], typeof(void)),
         new("VehicleUpdateState.GetReadOnlyStates", typeof(VehicleUpdateState), "GetReadOnlyStates",
@@ -140,7 +140,7 @@ internal static class GameplayTargets
         new("ReadOnlyPhysicsStates.Props", typeof(ReadOnlyPhysicsStates), "Props",
             MemberKind.Field, null, typeof(VehicleProperties).MakeByRefType(), IsStatic: false),
         new("ReadOnlyPhysicsStates.Time", typeof(ReadOnlyPhysicsStates), "Time",
-            MemberKind.Property, null, typeof(SimTime), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
+            MemberKind.Property, null, typeof(UniverseTime), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("SituationEx.IsOnRails", typeof(SituationEx), "IsOnRails",
             MemberKind.StaticMethod, [typeof(Situation)], typeof(bool)),
         new("ReadOnlyPhysicsStates.GetStatesCci", typeof(ReadOnlyPhysicsStates), "GetStatesCci",
@@ -161,7 +161,7 @@ internal static class GameplayTargets
         // predictor-owned vessels. Stock impacts still wake full physics.
         new("PatchedConic.CheckUpdateEncounter", typeof(PatchedConic), "CheckUpdateEncounter",
             MemberKind.Method,
-            [typeof(IOrbiter), typeof(SimTime).MakeByRefType(), typeof(double)], typeof(bool)),
+            [typeof(IOrbiter), typeof(UniverseTime).MakeByRefType(), typeof(double)], typeof(bool)),
         // Burn-past-impact preservation: everything BurnImpactPreservationPatch
         // consumes — both scoped entry points, the plan-id-to-vehicle lookup, the
         // copy constructor, and the EndTime field the extension writes.
@@ -183,31 +183,31 @@ internal static class GameplayTargets
         new("PatchedConic..ctor(copy)", typeof(PatchedConic), ".ctor",
             MemberKind.Constructor, [typeof(PatchedConic)]),
         new("PatchedConic.EndTime", typeof(PatchedConic), "EndTime",
-            MemberKind.Field, null, typeof(SimTime), IsStatic: false),
-        new("Vehicle.UpdateTask", typeof(Vehicle), "UpdateTask",
-            MemberKind.Field, null, typeof(VehicleUpdateTask), IsStatic: false),
-        new("VehicleUpdateTask.NumVehicles", typeof(VehicleUpdateTask), "NumVehicles",
-            MemberKind.Property, null, typeof(int), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
+            MemberKind.Field, null, typeof(UniverseTime), IsStatic: false),
         new("FlightPlan.CalculateEscapePatch", typeof(FlightPlan), "CalculateEscapePatch",
             MemberKind.StaticMethod,
-            [typeof(PatchedConic), typeof(SimTime), typeof(PatchedConic).MakeByRefType(),
+            [typeof(PatchedConic), typeof(UniverseTime), typeof(PatchedConic).MakeByRefType(),
              typeof(bool).MakeByRefType()], typeof(bool)),
         new("VehicleUpdateState.RecalculateFlightPlan", typeof(VehicleUpdateState),
             "RecalculateFlightPlan", MemberKind.Method, [typeof(bool)], typeof(void)),
         new("PatchedConic.StartTime", typeof(PatchedConic), "StartTime",
-            MemberKind.Field, null, typeof(SimTime), IsStatic: false),
-        new("SimTime.op_Addition(time,double)", typeof(SimTime), "op_Addition",
-            MemberKind.StaticMethod, [typeof(SimTime), typeof(double)], typeof(SimTime)),
+            MemberKind.Field, null, typeof(UniverseTime), IsStatic: false),
+        new("UniverseTime.op_Addition(time,double)", typeof(UniverseTime), "op_Addition",
+            MemberKind.StaticMethod, [typeof(UniverseTime), typeof(double)], typeof(UniverseTime)),
 
         // Stock attitude Toward/Away/Antivel target snapshot. The postfix replaces
         // only the stale Kepler position and velocity with rails/predictor truth.
         new("NavigationTarget.Create", typeof(NavigationTarget), "Create",
             MemberKind.StaticMethod,
-            [typeof(IOrbiter), typeof(IParentBody), typeof(SimTime)], typeof(NavigationTarget?)),
+            [typeof(IOrbiter), typeof(Part), typeof(IParentBody), typeof(UniverseTime)], typeof(NavigationTarget?)),
         new("NavigationTarget.PositionCci", typeof(NavigationTarget), "PositionCci",
             MemberKind.Field, null, typeof(double3), IsStatic: false),
         new("NavigationTarget.VelocityCci", typeof(NavigationTarget), "VelocityCci",
             MemberKind.Field, null, typeof(double3), IsStatic: false),
+        new("IOrbiter.Orbit", typeof(IOrbiter), "Orbit", MemberKind.Property,
+            null, typeof(Orbit), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
+        new("IOrbiter.GetPositionEcl(time)", typeof(IOrbiter), "GetPositionEcl",
+            MemberKind.Method, [typeof(UniverseTime)], typeof(double3)),
 
         // Within-tick burn witness: force ReseedPending when a tick's
         // stock-accumulated DeltaVelocityCci is nonzero.
@@ -218,9 +218,9 @@ internal static class GameplayTargets
 
         // Save + overlay + adapters
         new("Universe.CurrentSystem", typeof(Universe), "CurrentSystem", MemberKind.Property, null, typeof(CelestialSystem), IsStatic: true, RequiredAccessors: PropertyAccessors.Getter),
-        new("Universe.GetElapsedSimTime", typeof(Universe), "GetElapsedSimTime", MemberKind.StaticMethod, Type.EmptyTypes, typeof(SimTime)),
+        new("Universe.GetElapsedTime", typeof(Universe), "GetElapsedTime", MemberKind.StaticMethod, Type.EmptyTypes, typeof(UniverseTime)),
         new("Universe.GetSimulationSpeed", typeof(Universe), "GetSimulationSpeed", MemberKind.StaticMethod, Type.EmptyTypes, typeof(double)),
-        new("JobSystems.VehicleSolvers", typeof(JobSystems), "VehicleSolvers", MemberKind.Field, null, typeof(JobScheduler), IsStatic: true),
+        new("JobSystems.VehicleSolver", typeof(JobSystems), "VehicleSolver", MemberKind.Field, null, typeof(JobScheduler), IsStatic: true),
         new("JobScheduler.Wait", typeof(JobScheduler), "Wait", MemberKind.Method, Type.EmptyTypes, typeof(void)),
         // Stable save identity seams. UncompressedSave.Write runs after Populate for
         // UI-new and console-new saves, and is also reached through Overwrite -> Make;
@@ -268,7 +268,7 @@ internal static class GameplayTargets
             ],
             typeof(void)),
         new("FlightComputerNavigation.Time", typeof(FlightComputerNavigation), "Time",
-            MemberKind.Field, null, typeof(SimTime), IsStatic: false),
+            MemberKind.Field, null, typeof(UniverseTime), IsStatic: false),
         new("FlightComputerOutput.Thrusters", typeof(FlightComputerOutput), "Thrusters",
             MemberKind.Field, null,
             typeof(ModuleStateful<ThrusterController, ThrusterControllerState,
@@ -285,7 +285,7 @@ internal static class GameplayTargets
         new("ThrusterControllerState.CommandPulseTime", typeof(ThrusterControllerState),
             "CommandPulseTime", MemberKind.Field, null, typeof(double), IsStatic: false),
         new("BurnTarget.IgnitionTime", typeof(BurnTarget), "IgnitionTime", MemberKind.Field,
-            null, typeof(SimTime), IsStatic: false),
+            null, typeof(UniverseTime), IsStatic: false),
         new("BurnTarget.DeltaVTargetCci", typeof(BurnTarget), "DeltaVTargetCci", MemberKind.Field,
             null, typeof(float3), IsStatic: false),
         new("BurnTarget.DeltaVToGoCci", typeof(BurnTarget), "DeltaVToGoCci",
@@ -293,12 +293,12 @@ internal static class GameplayTargets
         new("Universe.IsAutoWarpActive", typeof(Universe), "IsAutoWarpActive",
             MemberKind.Property, null, typeof(bool), IsStatic: true, RequiredAccessors: PropertyAccessors.Getter),
         new("Universe.AutoWarpTime", typeof(Universe), "AutoWarpTime",
-            MemberKind.Property, null, typeof(SimTime?), IsStatic: true, RequiredAccessors: PropertyAccessors.Getter),
+            MemberKind.Property, null, typeof(UniverseTime?), IsStatic: true, RequiredAccessors: PropertyAccessors.Getter),
         new("Universe.AutoWarpStop", typeof(Universe), "AutoWarpStop",
             MemberKind.StaticMethod, [typeof(bool)], typeof(void)),
-        new("Burn.Time", typeof(Burn), "Time", MemberKind.Field, null, typeof(SimTime), IsStatic: false),
+        new("Burn.Time", typeof(Burn), "Time", MemberKind.Field, null, typeof(UniverseTime), IsStatic: false),
         new("Burn.DeltaVVlf", typeof(Burn), "DeltaVVlf", MemberKind.Field, null, typeof(double3), IsStatic: false),
-        new("Program.ControlledVehicle", typeof(Program), "ControlledVehicle", MemberKind.Field, null, typeof(Vehicle), IsStatic: true),
+        new("Program.ControlledVehicle", typeof(Program), "ControlledVehicle", MemberKind.Property, null, typeof(Vehicle), IsStatic: true, RequiredAccessors: PropertyAccessors.Getter),
         new("InputEvents.VehicleResourcesChangeBuffer", typeof(InputEvents),
             "VehicleResourcesChangeBuffer", MemberKind.Field, null,
             typeof(InputEvents.TypedBuffer<InputEvents.VehicleResourcesChangeData>), IsStatic: true),
@@ -350,7 +350,7 @@ internal static class GameplayTargets
             MemberKind.Field, null, typeof(double), IsStatic: false),
         // Overlay member touches (registry contract: every game member the mod
         // reads or calls is validated before use).
-        new("Orbit.TimeAtPeriapsis", typeof(Orbit), "TimeAtPeriapsis", MemberKind.Property, null, typeof(SimTime), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
+        new("Orbit.TimeAtPeriapsis", typeof(Orbit), "TimeAtPeriapsis", MemberKind.Property, null, typeof(UniverseTime), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("Vehicle.FlightComputer", typeof(Vehicle), "FlightComputer", MemberKind.Property, null, typeof(FlightComputer), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("BurnPlan.BurnCount", typeof(BurnPlan), "BurnCount", MemberKind.Property, null, typeof(int), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("BurnPlan.TryGetBurn(int,out)", typeof(BurnPlan), "TryGetBurn", MemberKind.Method,
@@ -359,18 +359,18 @@ internal static class GameplayTargets
             Type.EmptyTypes, typeof(doubleQuat?)),
         new("TrueAnomaly.NaN", typeof(TrueAnomaly), "NaN", MemberKind.Property, null, typeof(TrueAnomaly), IsStatic: true, RequiredAccessors: PropertyAccessors.Getter),
         new("OrbitPointCce..ctor(pos,tPe,rem,ta,danger)", typeof(OrbitPointCce), ".ctor", MemberKind.Constructor,
-            [typeof(double3), typeof(SimTime), typeof(SimTime), typeof(TrueAnomaly), typeof(bool)]),
-        new("SimTime..ctor(seconds)", typeof(SimTime), ".ctor", MemberKind.Constructor, [typeof(double)]),
+            [typeof(double3), typeof(UniverseTime), typeof(UniverseTime), typeof(TrueAnomaly), typeof(bool)]),
+        new("UniverseTime..ctor(seconds)", typeof(UniverseTime), ".ctor", MemberKind.Constructor, [typeof(double)]),
 
         // Map pipeline surfaces. Signatures verified in decompiled sources:
-        // MapController.cs:124, Viewport.cs:14/366, Camera.cs:94/140,
+        // MapController.cs:124, IViewport.cs:14/366, Camera.cs:94/140,
         // Transform3D.cs:13, IPosition.cs:5. (Vehicle.OnPreRender is deliberately
         // unpatched: the vessel draw-site takeover, VesselLinePatch, covers
         // re-staging — no code touches it.)
         new("MapController.OnFrame", typeof(MapController), "OnFrame", MemberKind.Method,
-            [typeof(Viewport), typeof(double)], typeof(void)),
-        new("Viewport.Mode", typeof(Viewport), "Mode", MemberKind.Field, null, typeof(CameraMode), IsStatic: false),
-        new("Viewport.GetCamera", typeof(Viewport), "GetCamera", MemberKind.Method, Type.EmptyTypes, typeof(Camera)),
+            [typeof(IViewport), typeof(double)], typeof(void)),
+        new("IViewport.Mode", typeof(IViewport), "Mode", MemberKind.Property, null, typeof(CameraMode), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
+        new("IViewport.GetCamera", typeof(IViewport), "GetCamera", MemberKind.Method, Type.EmptyTypes, typeof(Camera)),
         new("Camera.PositionEcl", typeof(Camera), "PositionEcl", MemberKind.Property, null, typeof(double3), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter | PropertyAccessors.Setter),
         new("Camera.Following", typeof(Camera), "Following", MemberKind.Property, null, typeof(IFollowable), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("Transform3D.LocalRotation", typeof(Transform3D), "LocalRotation", MemberKind.Field, null, typeof(doubleQuat), IsStatic: false),
@@ -407,24 +407,24 @@ internal static class GameplayTargets
         new("Burn.Update(fc)", typeof(Burn), "Update", MemberKind.Method,
             [typeof(FlightComputer)], typeof(void)),
         new("Burn.Vehicle", typeof(Burn), "Vehicle", MemberKind.Field, null, typeof(Vehicle), IsStatic: false),
-        new("BurnPlan.TryGetBurn(SimTime,out)", typeof(BurnPlan), "TryGetBurn", MemberKind.Method,
-            [typeof(SimTime), typeof(Burn).MakeByRefType()], typeof(bool)),
+        new("BurnPlan.TryGetBurn(UniverseTime,out)", typeof(BurnPlan), "TryGetBurn", MemberKind.Method,
+            [typeof(UniverseTime), typeof(Burn).MakeByRefType()], typeof(bool)),
         new("BurnPlan.TryGetBurnPatch", typeof(BurnPlan), "TryGetBurnPatch", MemberKind.Method,
             [typeof(Burn)], typeof(PatchedConic)),
         new("BurnPlan.FlightPlansOutOfDate", typeof(BurnPlan), "FlightPlansOutOfDate",
             MemberKind.Field, null, typeof(bool), IsStatic: false),
         new("BurnPlan.TryGetValidTimeLinePatch", typeof(BurnPlan), "TryGetValidTimeLinePatch",
-            MemberKind.Method, [typeof(SimTime)], typeof(PatchedConic)),
+            MemberKind.Method, [typeof(UniverseTime)], typeof(PatchedConic)),
         new("FlightPlan.TryFindPatch", typeof(FlightPlan), "TryFindPatch", MemberKind.Method,
-            [typeof(SimTime)], typeof(PatchedConic)),
+            [typeof(UniverseTime)], typeof(PatchedConic)),
         new("Vehicle.FlightPlan", typeof(Vehicle), "FlightPlan", MemberKind.Property, null, typeof(FlightPlan), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("Orbit.GetPointAt", typeof(Orbit), "GetPointAt", MemberKind.Method,
-            [typeof(SimTime)], typeof(OrbitPointCce)),
+            [typeof(UniverseTime)], typeof(OrbitPointCce)),
 
         // Honest orbit lines: vessel draw-site takeover (VesselLinePatch).
         // Shapes verified in decompiled sources: FlightPlan.cs:758/74,
         // Orbit.cs:2266, Camera.cs:213, Double3Ex.cs:15, Vehicle.cs:339/343,
-        // Astronomical.cs:391, SimTime.cs:10. InactiveColor's Color.Preset is
+        // Astronomical.cs:391, UniverseTime.cs:10. InactiveColor's Color.Preset is
         // Brutal.Numerics (Color.cs:8); its implicit byte4 operator (Color.cs:33)
         // carries the (byte4) cast — Brutal primitives are engine-stable, not pinned.
         // The two AddLineInstances danger params and the DrawLines danger tail
@@ -432,21 +432,21 @@ internal static class GameplayTargets
         // all default; the mod's stale-patch-0 mirror deliberately leaves them at
         // their defaults, so no DangerDisplay value is compiled into patch IL.
         new("FlightPlan.AddLineInstances", typeof(FlightPlan), "AddLineInstances", MemberKind.Method,
-            [typeof(Viewport), typeof(IOrbiter), typeof(bool), typeof(bool), typeof(TrueAnomaly), typeof(TrueAnomaly),
+            [typeof(IViewport), typeof(IOrbiter), typeof(bool), typeof(bool), typeof(TrueAnomaly), typeof(TrueAnomaly),
              typeof(bool), typeof(bool)], typeof(void)),
         new("FlightPlan.InactiveColor", typeof(FlightPlan), "InactiveColor", MemberKind.Field, null, typeof(Color.Preset), IsStatic: true),
         new("Orbit.DrawLines(color)", typeof(Orbit), "DrawLines", MemberKind.Method,
-            [typeof(Viewport), typeof(double3), typeof(SimTime), typeof(byte4),
+            [typeof(IViewport), typeof(double3), typeof(UniverseTime), typeof(byte4),
              typeof(TrueAnomaly), typeof(TrueAnomaly), typeof(bool), typeof(bool), typeof(bool),
-             typeof(Orbit.DangerDisplay), typeof(bool), typeof(SimTime?), typeof(byte4?)], typeof(void)),
+             typeof(Orbit.DangerDisplay), typeof(bool), typeof(UniverseTime?), typeof(byte4?)], typeof(void)),
         new("Camera.GetPositionEgo", typeof(Camera), "GetPositionEgo", MemberKind.Method,
             [typeof(IPosition)], typeof(double3)),
         new("Vehicle.ShowOrbit", typeof(Vehicle), "ShowOrbit", MemberKind.Property, null, typeof(bool).MakeByRefType(), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter), // ref bool, Vehicle.cs:339
         new("Vehicle.TargetOfControlledVehicle", typeof(Vehicle), "TargetOfControlledVehicle", MemberKind.Property, null, typeof(bool), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("Astronomical.ShouldDrawUiOrLines", typeof(Astronomical), "ShouldDrawUiOrLines", MemberKind.StaticMethod,
-            [typeof(IParentBody), typeof(Viewport), typeof(Orbit)], typeof(bool)), // Orbit? erases to Orbit at runtime
+            [typeof(IParentBody), typeof(IViewport), typeof(Orbit)], typeof(bool)), // Orbit? erases to Orbit at runtime
         new("Double3Ex.NaN", typeof(Double3Ex), "NaN", MemberKind.Property, null, typeof(double3), IsStatic: true, RequiredAccessors: PropertyAccessors.Getter),
-        new("SimTime.Zero", typeof(SimTime), "Zero", MemberKind.Property, null, typeof(SimTime), IsStatic: true, RequiredAccessors: PropertyAccessors.Getter),
+        new("UniverseTime.Zero", typeof(UniverseTime), "Zero", MemberKind.Property, null, typeof(UniverseTime), IsStatic: true, RequiredAccessors: PropertyAccessors.Getter),
         // Instance routing: a burn's post-burn plan is recognized by
         // identity against Burn.FlightPlan — public field, Burn.cs:36.
         new("Burn.FlightPlan", typeof(Burn), "FlightPlan", MemberKind.Field, null, typeof(FlightPlan), IsStatic: false),
@@ -459,35 +459,32 @@ internal static class GameplayTargets
         // ShouldDrawLines; Orbit? erases to Orbit at runtime); Orbit.cs:2071 (the
         // default-color DrawLines overload).
         new("Celestial.AddLineInstances", typeof(Celestial), "AddLineInstances", MemberKind.Method,
-            [typeof(Viewport)], typeof(void)),
+            [typeof(IViewport)], typeof(void)),
         new("Celestial.ShowOrbit", typeof(Celestial), "ShowOrbit", MemberKind.Property, null, typeof(bool).MakeByRefType(), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("Celestial.TargetOfControlledVehicle", typeof(Celestial), "TargetOfControlledVehicle", MemberKind.Property, null, typeof(bool), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("Astronomical.ShouldDrawLines", typeof(Astronomical), "ShouldDrawLines", MemberKind.StaticMethod,
-            [typeof(Astronomical), typeof(Viewport), typeof(Orbit)], typeof(bool)),
+            [typeof(Astronomical), typeof(IViewport), typeof(Orbit)], typeof(bool)),
         new("Orbit.DrawLines", typeof(Orbit), "DrawLines", MemberKind.Method,
-            [typeof(Viewport), typeof(double3), typeof(SimTime), typeof(bool), typeof(bool), typeof(bool)], typeof(void)),
+            [typeof(IViewport), typeof(double3), typeof(UniverseTime), typeof(bool), typeof(bool), typeof(bool)], typeof(void)),
 
         // Honest-density lines + finite-burn estimation. Shapes
         // verified in decompiled sources: OrbitLinePass.cs:293/275 (the growable
         // vertex append the dense draw feeds — Span parameters, no length limit),
         // Orbit.cs:2243 (IsVisible: the FOV + 5-px cull kept for stock parity),
         // FlightComputer.cs:63/101 (TotalMassPropsBody field, VehicleConfig
-        // property), :71-73 (ActiveEngineThrust/ActiveEngineMassFlowRate — the
-        // executor's own duration inputs, refreshed each control tick by
-        // UpdateActiveEnginePerformance :721-735 and read by the rocket-equation
-        // mirror; UpdateBurnTarget consumes them at :750-756), MassProperties.cs:9
+        // property), ActiveEnginePerformanceMax (the executor's duration inputs), MassProperties.cs:9
         // (Mass field). float3.Pack / double3.IsNaN are Brutal/KSA primitives per
         // the Brutal-stability note above (Double3Ex.NaN is already pinned).
         new("OrbitLinePass.AddLineVertices", typeof(OrbitLinePass), "AddLineVertices", MemberKind.StaticMethod,
-            [typeof(Viewport), typeof(Span<float3>), typeof(Span<byte4>)], typeof(void)),
+            [typeof(IViewport), typeof(Span<float3>), typeof(Span<byte4>)], typeof(void)),
         new("OrbitLinePass.AddLineEnd", typeof(OrbitLinePass), "AddLineEnd", MemberKind.StaticMethod,
-            [typeof(Viewport)], typeof(void)),
+            [typeof(IViewport)], typeof(void)),
         new("Orbit.IsVisible", typeof(Orbit), "IsVisible", MemberKind.Method,
             [typeof(Camera)], typeof(bool)),
         // The screen-space emit filter reads the camera's exact
         // pixels-per-angle formula (Camera.cs:712-722) and detects stock cache
         // overwrites via the payload TA (OrbitPointCce.cs:12 — NaN on mod points).
-        new("Camera.GetObjectDiameterPixelsFrac", typeof(Camera), "GetObjectDiameterPixelsFrac",
+        new("Camera.GetObjectDiameterPixels", typeof(Camera), "GetObjectDiameterPixels",
             MemberKind.Method, [typeof(double), typeof(double)], typeof(double)),
         new("Orbit.CachedPoints", typeof(Orbit), "CachedPoints", MemberKind.Property,
             null, typeof(Span<OrbitPointCce>), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
@@ -496,10 +493,12 @@ internal static class GameplayTargets
             MemberKind.Field, null, typeof(MassProperties), IsStatic: false),
         new("FlightComputer.VehicleConfig", typeof(FlightComputer), "VehicleConfig",
             MemberKind.Property, null, typeof(FlightComputer.VehicleConfigInfo), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
-        new("FlightComputer.ActiveEngineThrust", typeof(FlightComputer),
-            "ActiveEngineThrust", MemberKind.Field, null, typeof(float), IsStatic: false),
-        new("FlightComputer.ActiveEngineMassFlowRate", typeof(FlightComputer),
-            "ActiveEngineMassFlowRate", MemberKind.Field, null, typeof(float), IsStatic: false),
+        new("FlightComputer.ActiveEnginePerformanceMax", typeof(FlightComputer),
+            "ActiveEnginePerformanceMax", MemberKind.Field, null, typeof(ActiveEnginePerformance), IsStatic: false),
+        new("ActiveEnginePerformance.Thrust", typeof(ActiveEnginePerformance),
+            "Thrust", MemberKind.Field, null, typeof(float), IsStatic: false),
+        new("ActiveEnginePerformance.MassFlowRate", typeof(ActiveEnginePerformance),
+            "MassFlowRate", MemberKind.Field, null, typeof(float), IsStatic: false),
         new("MassProperties.Mass", typeof(MassProperties), "Mass", MemberKind.Field, null, typeof(float), IsStatic: false),
 
         // Forward-RCS finite-plan estimate. The committed state list supplies KSA's
@@ -532,7 +531,7 @@ internal static class GameplayTargets
         new("RocketNozzle.ExhaustDirectionAsmb", typeof(RocketNozzle), "ExhaustDirectionAsmb",
             MemberKind.Field, null, typeof(float3), IsStatic: false),
         new("Module<RocketNozzle>.Parent", typeof(Module<RocketNozzle>), "Parent",
-            MemberKind.Field, null, typeof(Part), IsStatic: false),
+            MemberKind.Property, null, typeof(Part), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("Part.Asmb2VehicleAsmb", typeof(Part), "Asmb2VehicleAsmb",
             MemberKind.Property, null, typeof(doubleQuat), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("NozzlePerformance.GetTotalThrust", typeof(NozzlePerformance), "GetTotalThrust",
@@ -553,8 +552,8 @@ internal static class GameplayTargets
         // FlightComputer.BurnPlan, BurnPlan.BurnCount, BurnPlan.TryGetBurn(int,out),
         // Burn.FlightPlan, Vehicle.FlightPlan) are existing entries above.
         new("PatchedConic.DrawUi", typeof(PatchedConic), "DrawUi", MemberKind.Method,
-            [typeof(Viewport), typeof(Astronomical.UiContext), typeof(int), typeof(PatchedConic), typeof(PatchedConic),
-             typeof(bool), typeof(bool), typeof(bool)], typeof(bool)),
+            [typeof(IViewport), typeof(Astronomical.UiContext), typeof(int), typeof(PatchedConic), typeof(PatchedConic),
+             typeof(bool), typeof(bool), typeof(bool), typeof(bool)], typeof(bool)),
         new("UiContext.Astronomical", typeof(Astronomical.UiContext), "Astronomical", MemberKind.Field, null, typeof(Astronomical), IsStatic: false),
         new("PatchedConic.EndTransition", typeof(PatchedConic), "EndTransition", MemberKind.Field, null, typeof(PatchTransition), IsStatic: false),
         new("PatchedConic.HoveredMarker", typeof(PatchedConic), "HoveredMarker", MemberKind.Field, null, typeof(bool), IsStatic: false),
@@ -569,19 +568,19 @@ internal static class GameplayTargets
         // IParentBody.cs:11 (Mass — StellarBody.cs:38 and Celestial.cs:86 both implement;
         // the interface token covers the root and every celestial in one entry),
         // Astronomical.cs:93 (MeanRadius, abstract — override calls bind to this token),
-        // Orbit.cs:1966 (GetStateVectorsAt(SimTime): pure DEFINING-conic evaluation —
+        // Orbit.cs:1966 (GetStateVectorsAt(UniverseTime): pure DEFINING-conic evaluation —
         // time→anomaly→perifocal state→Orb2ParentCci, never the propagated cache).
         // Already-registered members the reader also touches: Universe.CurrentSystem,
         // Astronomical.Id, Celestial.Orbit, Orbit.Parent, IObjectId.Id,
-        // IParentBody.GetCci2Cce, SimTime..ctor(seconds), StateVectors.PositionCci/VelocityCci.
+        // IParentBody.GetCci2Cce, UniverseTime..ctor(seconds), StateVectors.PositionCci/VelocityCci.
         new("CelestialSystem.Count", typeof(CelestialSystem), "Count", MemberKind.Property, null, typeof(int), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("CelestialSystem.Id", typeof(CelestialSystem), "Id", MemberKind.Property, null, typeof(string), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("CelestialSystem.GetIndex(int)", typeof(CelestialSystem), "GetIndex", MemberKind.Method,
             [typeof(int)], typeof(Astronomical)),
         new("IParentBody.Mass", typeof(IParentBody), "Mass", MemberKind.Property, null, typeof(double), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("Astronomical.MeanRadius", typeof(Astronomical), "MeanRadius", MemberKind.Property, null, typeof(double), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
-        new("Orbit.GetStateVectorsAt(SimTime)", typeof(Orbit), "GetStateVectorsAt", MemberKind.Method,
-            [typeof(SimTime)], typeof(StateVectors)),
+        new("Orbit.GetStateVectorsAt(UniverseTime)", typeof(Orbit), "GetStateVectorsAt", MemberKind.Method,
+            [typeof(UniverseTime)], typeof(StateVectors)),
 
         // Terrain-aware Surface-frame impact cut.
         new("Celestial.GetTerrainHeightFromDirCcf", typeof(Celestial),
@@ -601,29 +600,29 @@ internal static class GameplayTargets
         // prefix type-tests against). Draw-site evidence: IOrbiter.cs:296-311 (the SOI
         // sphere, the game's only glass-ball user).
         new("GizmoParent.UpdateRenderData", typeof(GizmoParent), "UpdateRenderData", MemberKind.Method,
-            [typeof(Viewport), typeof(int), typeof(int)], typeof(void)),
+            [typeof(IViewport), typeof(int), typeof(int)], typeof(void)),
         new("GizmoParent.Instances", typeof(GizmoParent), "Instances", MemberKind.Field, null, typeof(List<GenericGizmo>), IsStatic: false),
         new("GizmoParent.RenderData", typeof(GizmoParent), "RenderData", MemberKind.Field, null, typeof(IGizmoRenderData), IsStatic: false),
         new("GenericGizmo.PassIndex", typeof(GenericGizmo), "PassIndex", MemberKind.Field, null, typeof(int), IsStatic: false),
         new("GenericGizmo.GetSegmentDataByViewport", typeof(GenericGizmo), "GetSegmentDataByViewport", MemberKind.Method,
-            [typeof(Viewport)], typeof(GenericGizmo.PerSegmentData[])),
+            [typeof(IViewport)], typeof(GenericGizmo.PerSegmentData[])),
         new("PerSegmentData.Active", typeof(GenericGizmo.PerSegmentData), "Active", MemberKind.Field, null, typeof(bool), IsStatic: false),
         new("GenericGizmo.Static.GlassBallGizmoRenderData", typeof(GenericGizmo.Static), "GlassBallGizmoRenderData",
             MemberKind.Field, null, typeof(GlassBallGizmoRenderData), IsStatic: true),
 
         // Body-surface frames require the body's spin transform (BodyRotationReader).
         // Shapes verified in decompiled sources: IParentBody.cs:31
-        // (GetCcf2Cce(SimTime) — Celestial.cs:560 composes the constant-rate UnitZ spin,
+        // (GetCcf2Cce(UniverseTime) — Celestial.cs:560 composes the constant-rate UnitZ spin,
         // Celestial.cs:547, with the constant _cci2Cce tilt, Celestial.cs:585;
         // StellarBody.cs:126 returns Identity) and IParentBody.cs:68 (GetAngularVelocity
         // — Celestial.cs:196 returns the template spin rate rad/s, negative when
         // retrograde per Celestial.cs:612-629; StellarBody.cs:137 returns 0). The
-        // SimTime-parameterized overload is disambiguated from the parameterless
+        // UniverseTime-parameterized overload is disambiguated from the parameterless
         // sibling (IParentBody.cs:27) by the parameter list. Already-registered members
         // the reader also touches: Universe.CurrentSystem, CelestialSystem.Count,
-        // CelestialSystem.GetIndex(int), Astronomical.Id, SimTime..ctor(seconds).
-        new("IParentBody.GetCcf2Cce(SimTime)", typeof(IParentBody), "GetCcf2Cce", MemberKind.Method,
-            [typeof(SimTime)], typeof(doubleQuat)),
+        // CelestialSystem.GetIndex(int), Astronomical.Id, UniverseTime..ctor(seconds).
+        new("IParentBody.GetCcf2Cce(UniverseTime)", typeof(IParentBody), "GetCcf2Cce", MemberKind.Method,
+            [typeof(UniverseTime)], typeof(doubleQuat)),
         new("IParentBody.GetAngularVelocity", typeof(IParentBody), "GetAngularVelocity", MemberKind.Method,
             Type.EmptyTypes, typeof(double)),
 
@@ -636,12 +635,12 @@ internal static class GameplayTargets
         // (GetForwardEcl — the ego-depth axis stock's own ignore-behind dots
         // against, :344/:366), :67 (NearPlane property), :272 (EgoToClipDouble —
         // the hover pruner's independent clip-space bound);
-        // Viewport.cs:30 (Size public field); BurnPlan.cs:20 (BurnPatchColor static
+        // IViewport.cs:30 (Size public field); BurnPlan.cs:20 (BurnPatchColor static
         // Color.Preset — the user-configurable BurnLineColor setting,
         // GameSettings.cs:764); Burn.cs:115 (PositionCce computed property
-        // BurnNodePatch prefixes), :96 (Patch property), :119 (ParentEjectBurn).
+        // BurnNodePatch prefixes), :96 (Patch property), :119 (ParentDepartureBurn).
         new("Orbit.GetNearestPoint", typeof(Orbit), "GetNearestPoint", MemberKind.Method,
-            [typeof(Viewport), typeof(float2), typeof(PatchedConic),
+            [typeof(IViewport), typeof(float2), typeof(PatchedConic),
              typeof(OrbitPointCce?).MakeByRefType(), typeof(bool), typeof(float)], typeof(bool)),
         new("Camera.GetForwardEcl", typeof(Camera), "GetForwardEcl", MemberKind.Method,
             Type.EmptyTypes, typeof(double3)),
@@ -652,17 +651,17 @@ internal static class GameplayTargets
         // funnel, Orbit.cs:2440 (CelestialPosition? erases to its underlying type at
         // runtime, the out param is a byref Nullable).
         new("Orbit.GetNearestPosition", typeof(Orbit), "GetNearestPosition", MemberKind.Method,
-            [typeof(Viewport), typeof(float2), typeof(PatchedConic),
+            [typeof(IViewport), typeof(float2), typeof(PatchedConic),
              typeof(CelestialPosition?).MakeByRefType(), typeof(bool), typeof(float)], typeof(bool)),
         new("Camera.ScreenToNdc(float2,float)", typeof(Camera), "ScreenToNdc", MemberKind.Method,
             [typeof(float2), typeof(float)], typeof(float3)),
         new("Camera.EgoToScreen(double3,bool)", typeof(Camera), "EgoToScreen", MemberKind.Method,
             [typeof(double3), typeof(bool)], typeof(float2)),
-        new("Viewport.Size", typeof(Viewport), "Size", MemberKind.Field, null, typeof(int2), IsStatic: false),
+        new("IViewport.Size", typeof(IViewport), "Size", MemberKind.Property, null, typeof(int2), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("BurnPlan.BurnPatchColor", typeof(BurnPlan), "BurnPatchColor", MemberKind.Field, null, typeof(Color.Preset), IsStatic: true),
         new("Burn.PositionCce", typeof(Burn), "PositionCce", MemberKind.Property, null, typeof(double3), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("Burn.Patch", typeof(Burn), "Patch", MemberKind.Property, null, typeof(PatchedConic), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
-        new("Burn.ParentEjectBurn", typeof(Burn), "ParentEjectBurn", MemberKind.Property, null, typeof(bool), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
+        new("Burn.ParentDepartureBurn", typeof(Burn), "ParentDepartureBurn", MemberKind.Property, null, typeof(bool), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         // Ownership-rule stale fallback + gizmo shrink. Shapes
         // verified in decompiled sources: PatchedConic.cs:66 (HidePatch public bool —
         // DrawStalePatch0 honors stock's own hide flag); Burn.cs:394 (UpdateGizmos,
@@ -672,7 +671,7 @@ internal static class GameplayTargets
         // with the SOI-indicator entries).
         new("PatchedConic.HidePatch", typeof(PatchedConic), "HidePatch", MemberKind.Field, null, typeof(bool), IsStatic: false),
         new("Burn.UpdateGizmos", typeof(Burn), "UpdateGizmos", MemberKind.Method,
-            [typeof(Viewport), typeof(double2)], typeof(void)),
+            [typeof(IViewport), typeof(double2)], typeof(void)),
         new("Burn.SphereGizmo", typeof(Burn), "SphereGizmo", MemberKind.Field, null, typeof(GenericGizmo), IsStatic: false),
         new("Burn.ConeGizmo", typeof(Burn), "ConeGizmo", MemberKind.Field, null, typeof(GenericGizmo), IsStatic: false),
         new("Burn.ConeReverseGizmo", typeof(Burn), "ConeReverseGizmo", MemberKind.Field, null, typeof(GenericGizmo), IsStatic: false),
@@ -683,13 +682,13 @@ internal static class GameplayTargets
 
         // Honest line markers (Ui.LineMarkers). Shapes verified in
         // decompiled sources: Program.cs:403 (MainViewport static property);
-        // Camera.cs:317 (EclToScreen(double3, bool)); Viewport.cs:28 (Position public
+        // Camera.cs:317 (EclToScreen(double3, bool)); IViewport.cs:28 (Position public
         // float2 field); ImGuiHelper.cs:549 (the draw-list DrawTextOnScreen overload —
         // stock's own map-marker text path, CelestialPosition.cs:43).
-        new("Program.MainViewport", typeof(Program), "MainViewport", MemberKind.Property, null, typeof(Viewport), IsStatic: true, RequiredAccessors: PropertyAccessors.Getter),
+        new("Program.MainViewport", typeof(Program), "MainViewport", MemberKind.Property, null, typeof(IGameViewport), IsStatic: true, RequiredAccessors: PropertyAccessors.Getter),
         new("Camera.EclToScreen(double3,bool)", typeof(Camera), "EclToScreen", MemberKind.Method,
             [typeof(double3), typeof(bool)], typeof(float2)),
-        new("Viewport.Position", typeof(Viewport), "Position", MemberKind.Field, null, typeof(float2), IsStatic: false),
+        new("IViewport.Position", typeof(IViewport), "Position", MemberKind.Property, null, typeof(float2), IsStatic: false, RequiredAccessors: PropertyAccessors.Getter),
         new("ImGuiHelper.DrawTextOnScreen(drawList)", typeof(ImGuiHelper), "DrawTextOnScreen",
             MemberKind.StaticMethod,
             [typeof(Brutal.ImGuiApi.ImDrawListPtr), typeof(float2), typeof(Brutal.ImGuiApi.ImString), typeof(byte4)],

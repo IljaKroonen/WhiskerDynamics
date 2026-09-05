@@ -37,7 +37,7 @@ internal static class BurnNodePatch
         {
             // Parent-eject burns live on the parent CELESTIAL's orbit (Burn.Patch is
             // the eject patch), not the vessel's polyline — stock places them right.
-            if (__instance.ParentEjectBurn) return true;
+            if (__instance.ParentDepartureBurn) return true;
             if (!TryDrawnBurnPosition(__instance, out var world))
                 return true; // out of window / stale / blink: stock conic position
 
@@ -70,7 +70,7 @@ internal static class BurnNodePatch
         string vesselId = burn.Vehicle.Id;
         double t = burn.Time.Seconds();
         long nowMs = Environment.TickCount64;
-        double nowSimSeconds = Universe.GetElapsedSimTime().Seconds();
+        double nowSimSeconds = Universe.GetElapsedTime().Seconds();
         if (OverlayBuffer.ReadPlannedFresh(vesselId, nowMs, nowSimSeconds) is { } planned
             && TrajectoryOverlay.TryDrawnPositionAt(planned, t, out world))
             return true;

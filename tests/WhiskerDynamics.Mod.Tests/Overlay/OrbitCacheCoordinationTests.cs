@@ -250,18 +250,18 @@ public class OrbitCacheCoordinationTests
     private static OrbitPointCce[] StockPoints(double seed) =>
     [
         new(new double3(seed, seed + 1, seed + 2),
-            new SimTime(seed + 3), new SimTime(seed + 4), new TrueAnomaly(0.25)),
+            new UniverseTime(seed + 3), new UniverseTime(seed + 4), new TrueAnomaly(0.25)),
         new(new double3(-seed, -seed - 1, -seed - 2),
-            new SimTime(seed + 5), new SimTime(seed + 6), new TrueAnomaly(5.5),
+            new UniverseTime(seed + 5), new UniverseTime(seed + 6), new TrueAnomaly(5.5),
             inDangerZone: true),
     ];
 
     private static OrbitPointCce[] ModPoints(double seed) =>
     [
         new(new double3(seed, seed + 1, seed + 2),
-            new SimTime(seed + 3), new SimTime(seed + 4), TrueAnomaly.NaN),
+            new UniverseTime(seed + 3), new UniverseTime(seed + 4), TrueAnomaly.NaN),
         new(new double3(-seed, -seed - 1, -seed - 2),
-            new SimTime(seed + 5), new SimTime(seed + 6), TrueAnomaly.NaN),
+            new UniverseTime(seed + 5), new UniverseTime(seed + 6), TrueAnomaly.NaN),
     ];
 
     private static void AssertPointsEqual(

@@ -87,7 +87,7 @@ internal static class SaveDrillPatch
         {
             var config = ModServices.Config;
             if (Universe.CurrentSystem is null) return;
-            double elapsed = Universe.GetElapsedSimTime().Seconds();
+            double elapsed = Universe.GetElapsedTime().Seconds();
             if (!_saveFired && config.DrillSaveName.Length > 0 && config.DrillSaveAtSeconds > 0
                 && elapsed >= config.DrillSaveAtSeconds)
             {

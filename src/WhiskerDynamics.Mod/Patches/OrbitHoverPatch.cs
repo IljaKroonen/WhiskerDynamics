@@ -46,7 +46,7 @@ internal static class OrbitHoverPatch
 
     internal static void ResetSessionStatics() => System.Threading.Volatile.Write(ref _activeLogged, 0);
 
-    static bool Prefix(Orbit __instance, Viewport inViewPort, float2 mousePosScreen,
+    static bool Prefix(Orbit __instance, IViewport inViewPort, float2 mousePosScreen,
         PatchedConic? patch, ref OrbitPointCce? pointSelected,
         float mouseDistanceScreenPercent, ref bool __result)
     {
@@ -61,7 +61,7 @@ internal static class OrbitHoverPatch
             var actual = OverlayBuffer.Read(vehicle.Id);
             if (actual is null) return true; // never published: stock everywhere (fallback)
             long nowMs = Environment.TickCount64;
-            double nowSimSeconds = Universe.GetElapsedSimTime().Seconds();
+            double nowSimSeconds = Universe.GetElapsedTime().Seconds();
             bool fresh = OverlayBuffer.ConsumerSamplesUsable(
                 vehicle.Id, actual, nowMs, nowSimSeconds);
             bool lineVisible = vehicle.ShowOrbit || vehicle.TargetOfControlledVehicle;
@@ -152,7 +152,7 @@ internal static class OrbitHoverPatch
     /// the batch arrays are immutable, so this is safe from the hover job's worker
     /// thread while the render thread restages.</summary>
     private static bool TryNearestOnDrawnLine(Orbit orbit, OverlaySamples samples,
-        bool reanchorTimes, Viewport viewport, float2 mousePosScreen,
+        bool reanchorTimes, IViewport viewport, float2 mousePosScreen,
         float mouseDistanceScreenPercent, out OrbitPointCce? pointSelected)
     {
         pointSelected = null;
@@ -169,7 +169,7 @@ internal static class OrbitHoverPatch
         var frameCoordinates = samples.DenseFrameCoordinates;
         Vector3d Drawn(int i) => ctx.Drawn(positions[i], ctx.Framed ? frameCoordinates![i] : default);
         double clipTime = reanchorTimes
-            ? Universe.GetElapsedSimTime().Seconds()
+            ? Universe.GetElapsedTime().Seconds()
             : double.NegativeInfinity;
         OverlayKernel.FutureClip? clip = reanchorTimes
             ? OverlayKernel.FutureClipAt(times, clipTime)
@@ -235,8 +235,8 @@ internal static class OrbitHoverPatch
             : ctx.AnchorPeSeconds;
         pointSelected = new OrbitPointCce(
             FrameAdapter.ToGame(cce),
-            new SimTime(t - anchorPe),
-            new SimTime(t - samples.SampleT0),
+            new UniverseTime(t - anchorPe),
+            new UniverseTime(t - samples.SampleT0),
             TrueAnomaly.NaN,
             inDangerZone: false);
         return true;

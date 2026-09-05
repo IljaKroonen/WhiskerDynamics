@@ -15,7 +15,7 @@ namespace WhiskerDynamics.Mod.Patches;
 /// the policy shows it, anchored per the batch mode (inertial payloads are
 /// t − SampleT0, so currentTimeSincePe is now − SampleT0 — anchoring at zero at high
 /// warp would splice the body's current position beside the STALE arc start, a chord;
-/// frame payloads are t − now, so their anchor stays SimTime.Zero), then skip the
+/// frame payloads are t − now, so their anchor stays UniverseTime.Zero), then skip the
 /// original.
 /// Blink =&gt; fresh curve, wrong frame MODE: draw nothing, keep stock suppressed
 /// AND keep the restore debt (StagedIds) for the ≤~1 s until the worker's label-change
@@ -34,7 +34,7 @@ internal static class CelestialLinePatch
 
     internal static void ResetSessionStatics() => System.Threading.Volatile.Write(ref _activeLogged, 0);
 
-    static bool Prefix(Celestial __instance, Viewport inViewport)
+    static bool Prefix(Celestial __instance, IViewport inViewport)
     {
         try
         {
@@ -59,7 +59,7 @@ internal static class CelestialLinePatch
                 if (LineVisibility.ForCelestial(__instance, inViewport))
                     __instance.Orbit.DrawLines(inViewport,
                         inViewport.GetCamera().GetPositionEgo(__instance),
-                        SimTime.Zero);
+                        UniverseTime.Zero);
                 return false;
             }
             switch (CelestialCurves.Route(__instance))

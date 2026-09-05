@@ -186,7 +186,7 @@ internal static class GameTestScenarioPatch
             return;
         Pass(step, $"activated {count} staging sequences; "
             + $"active main-engine cores {activeCores}, active engine flow "
-            + $"{vessel.FlightComputer.ActiveEngineMassFlowRate:F3} kg/s");
+            + $"{vessel.FlightComputer.ActiveEnginePerformanceMax.MassFlowRate:F3} kg/s");
     }
 
     private static void PlanAndExecuteLunarTransfer(GameTestStep step)
@@ -221,7 +221,7 @@ internal static class GameTestScenarioPatch
                 throw new InvalidOperationException(
                     $"'{vessel.Id}' transfer predictor is unavailable: "
                     + PredictorAuthorityPolicy.Describe(authorityReason));
-            double now = Universe.GetElapsedSimTime().Seconds();
+            double now = Universe.GetElapsedTime().Seconds();
             if (!authority.Tracked.TryCaptureSolverSeed(
                     authority.Lineage, now, out StateVector seedState))
                 return;
@@ -299,7 +299,7 @@ internal static class GameTestScenarioPatch
         {
             Require(burns.Count == 0,
                 "lunar correction requires the departure node to be complete");
-            double now = Universe.GetElapsedSimTime().Seconds();
+            double now = Universe.GetElapsedTime().Seconds();
             Require(correctionTime >= now + PlannerKernel.MinLeadSeconds,
                 $"correction t={correctionTime:F1} is too close or already past "
                 + $"at t={now:F1}");
@@ -394,7 +394,7 @@ internal static class GameTestScenarioPatch
                 throw new InvalidOperationException(
                     $"'{vessel.Id}' Earth-SOI circularization predictor is unavailable: "
                     + PredictorAuthorityPolicy.Describe(authorityReason));
-            double now = Universe.GetElapsedSimTime().Seconds();
+            double now = Universe.GetElapsedTime().Seconds();
             if (!authority.Tracked.TryCaptureSolverSeed(
                     authority.Lineage, now, out StateVector seedState))
                 return;
@@ -423,7 +423,7 @@ internal static class GameTestScenarioPatch
             throw new InvalidOperationException(
                 _playerLunarCircularizationJob.Failure
                 ?? "Earth-SOI lunar circularization produced no result");
-        double nowAfterSolve = Universe.GetElapsedSimTime().Seconds();
+        double nowAfterSolve = Universe.GetElapsedTime().Seconds();
         Require(solution.BurnTime >= nowAfterSolve + PlannerKernel.MinLeadSeconds,
             $"predicted lunar circularization t={solution.BurnTime:F1} is too close "
             + $"or already past at t={nowAfterSolve:F1}");
@@ -559,7 +559,7 @@ internal static class GameTestScenarioPatch
         Require(maximumEccentricity > 0 && maximumEccentricity < 1,
             "maximum lunar-orbit eccentricity must be in (0, 1)");
 
-        double now = Universe.GetElapsedSimTime().Seconds();
+        double now = Universe.GetElapsedTime().Seconds();
         if (_lunarOrbitStartTime is null)
         {
             StateVector start = VesselRelativeToBody(vessel, "Luna");
@@ -675,7 +675,7 @@ internal static class GameTestScenarioPatch
 
     private static void Pass(GameTestStep step, string detail)
     {
-        double now = Universe.GetElapsedSimTime().Seconds();
+        double now = Universe.GetElapsedTime().Seconds();
         Results.Add(new GameTestStepResult
         {
             Index = _stepIndex,
@@ -758,7 +758,7 @@ internal static class GameTestScenarioPatch
 
     private static double? TrySimulationTime()
     {
-        try { return Universe.CurrentSystem is null ? null : Universe.GetElapsedSimTime().Seconds(); }
+        try { return Universe.CurrentSystem is null ? null : Universe.GetElapsedTime().Seconds(); }
         catch { return null; }
     }
 
@@ -785,7 +785,7 @@ internal static class GameTestScenarioPatch
             Require(_burnTargetMagnitude > 0 && float.IsFinite(_burnTargetMagnitude),
                 "next burn has no finite delta-v target");
             ModLog.Info($"game test: arming {_burnTargetMagnitude:F2} m/s burn; "
-                + $"mode={computer.BurnMode}, engine flow={computer.ActiveEngineMassFlowRate:F3} kg/s");
+                + $"mode={computer.BurnMode}, engine flow={computer.ActiveEnginePerformanceMax.MassFlowRate:F3} kg/s");
             QueueFlightComputer(vessel, FlightComputerBurnMode.Auto);
             _burnExecutionStage = 1;
             return;
@@ -802,7 +802,7 @@ internal static class GameTestScenarioPatch
             // PositiveInfinity or to a stale Manual-mode ignition estimate.
             double ignition = target.IgnitionTime.Seconds();
             if (!double.IsFinite(ignition)) return;
-            double now = Universe.GetElapsedSimTime().Seconds();
+            double now = Universe.GetElapsedTime().Seconds();
             Require(ignition > now,
                 $"next burn ignition t={ignition:F1} is no longer in the future (now {now:F1}); give the node more lead time");
             ModLog.Info($"game test: auto burn accepted; ignition t={ignition:F1}, now={now:F1}, "
@@ -843,7 +843,7 @@ internal static class GameTestScenarioPatch
                 {
                     _soiCrossingObserved = true;
                     double toIgnition = target.IgnitionTime.Seconds()
-                        - Universe.GetElapsedSimTime().Seconds();
+                        - Universe.GetElapsedTime().Seconds();
                     ModLog.Info("game test: SOI crossing observed under built-in "
                         + $"Auto Warp ('{_soiCrossingStartParentId}' -> '{parentId}', "
                         + $"{toIgnition:F0} s to ignition)");
@@ -853,7 +853,7 @@ internal static class GameTestScenarioPatch
             if (computer.BurnMode == FlightComputerBurnMode.Auto)
             {
                 double secondsToIgnition = target.IgnitionTime.Seconds()
-                    - Universe.GetElapsedSimTime().Seconds();
+                    - Universe.GetElapsedTime().Seconds();
                 Require(secondsToIgnition <= 5,
                     $"KSA built-in Auto Warp disengaged {secondsToIgnition:F1} s "
                     + "before ignition");

@@ -684,7 +684,7 @@ public static class FrameManager
             string? vesselId = ControlledVesselId();
             long selectionGeneration;
             lock (Gate) selectionGeneration = _selectionGeneration;
-            double now = KSA.Universe.GetElapsedSimTime().Seconds();
+            double now = KSA.Universe.GetElapsedTime().Seconds();
             if (GatedSample(spec, now, out var pose, out var rotation) is { } reason)
                 return reason; // gates refuse — don't activate
             if (!string.Equals(vesselId, ControlledVesselId(), StringComparison.Ordinal))
@@ -1004,7 +1004,7 @@ public static class FrameManager
         delta = Brutal.Numerics.doubleQuat.Identity;
         if (!TryCaptureActive(out var snapshot)) return false;
         if (snapshot.Spec.Kind == FrameKind.Inertial) return false;
-        double now = KSA.Universe.GetElapsedSimTime().Seconds();
+        double now = KSA.Universe.GetElapsedTime().Seconds();
         if (!TrySamplePose(snapshot, now, FramePoseQuery.CurrentDisplay, out var pose)) return false;
         var activation = snapshot.ActivationPose;
         var qNow = MapPoseKernel.QuatFromBasis(

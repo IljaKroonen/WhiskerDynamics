@@ -156,7 +156,7 @@ public static class ModServices
                     Config, GameConstants.ReadFromGame(), BodySettings);
                 replacement.SetAuthorityFaultHandler(HandleRailsAuthorityFailure);
                 replacement.CaptureEquatorialPolesOnMainThread();
-                replacement.PrepareAuthorityAt(Universe.GetElapsedSimTime().Seconds());
+                replacement.PrepareAuthorityAt(Universe.GetElapsedTime().Seconds());
                 replacement.ThrowIfAuthorityFaulted();
                 var replacementVessels = new VesselRegistry(Config, replacement);
                 long generation = BindingGeneration;

@@ -12,7 +12,7 @@ internal static class LineVisibility
         string.Equals(KSA.Program.ControlledVehicle?.Id, vehicle.Id, StringComparison.Ordinal);
 
     /// <summary>Only the controlled vessel can pass the stock line opt-in.</summary>
-    internal static bool ForVessel(Vehicle vehicle, Viewport viewport)
+    internal static bool ForVessel(Vehicle vehicle, IViewport viewport)
     {
         bool visible = LineVisibilityKernel.VesselLineVisible(
             stockOptIn: vehicle.ShowOrbit || vehicle.TargetOfControlledVehicle,
@@ -24,13 +24,13 @@ internal static class LineVisibility
         return true;
     }
 
-    internal static bool BypassOrbitVisibilityCheck(Viewport viewport, bool isActive) =>
+    internal static bool BypassOrbitVisibilityCheck(IViewport viewport, bool isActive) =>
         LineVisibilityKernel.BypassOrbitVisibilityCheck(
             isMapView: viewport.Mode == CameraMode.Map,
             isActive: isActive);
 
     /// <summary>The global toggle gates all stock-enabled celestial lines.</summary>
-    internal static bool ForCelestial(Celestial celestial, Viewport viewport)
+    internal static bool ForCelestial(Celestial celestial, IViewport viewport)
     {
         bool visible = LineVisibilityKernel.CelestialLineVisible(
             stockOptIn: celestial.ShowOrbit || celestial.TargetOfControlledVehicle,

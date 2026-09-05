@@ -5,8 +5,8 @@ using KSA;
 namespace WhiskerDynamics.Mod.Patches;
 
 /// <summary>The whole-map rotating view. Postfix on the map controller's
-/// per-frame pose pass — Viewport.OnFrame runs the controller, then Camera.OnFrame builds
-/// the view matrix (Viewport.cs:171-174), so this postfix re-poses the camera between the
+/// per-frame pose pass — GameViewport.OnFrame runs the controller, then Camera.OnFrame builds
+/// the view matrix, so this postfix re-poses the camera between the
 /// two: a rigid rotation of the camera rig about the FOLLOW ANCHOR (the
 /// followed target's position; the stock follow offset lives in fixed ecliptic axes, so
 /// rotating about the frame origin would slide off-origin targets away)
@@ -23,7 +23,7 @@ internal static class MapFramePatch
 
     internal static void ResetSessionStatics() => System.Threading.Volatile.Write(ref _activeLogged, 0);
 
-    static void Postfix(Viewport inViewport, double inDeltaTime)
+    static void Postfix(IViewport inViewport, double inDeltaTime)
     {
         if (!ModServices.Enabled) return;
         try
@@ -71,7 +71,7 @@ internal static class MapFramePatch
         var viewPosed = double3.Transform(target - posedPosition, doubleQuat.Inverse(posedRotation));
         double drift = (viewPosed - viewStock).Length();
         double angleDeg = 2.0 * Math.Acos(Math.Clamp(Math.Abs(delta.W), 0.0, 1.0)) * (180.0 / Math.PI);
-        double t = Universe.GetElapsedSimTime().Seconds();
+        double t = Universe.GetElapsedTime().Seconds();
         ModLog.Info($"map pose telemetry: following='{following.Id}' |T-C|={(target - center).Length():E3} m "
             + $"angle={angleDeg:F3} deg targetViewDrift={drift:E3} m t={t:F1} s");
     }

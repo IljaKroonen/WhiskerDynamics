@@ -246,7 +246,7 @@ public static class CelestialCurves
             if (throttled) return;
 
             if (ShouldStop()) return;
-            double now = KSA.Universe.GetElapsedSimTime().Seconds();
+            double now = KSA.Universe.GetElapsedTime().Seconds();
             double thetaMax = OverlayKernel.SamplingThetaRadians(
                 config.OverlayMaxTurnDeg);
             // Clamp to the rails window ACTUALLY integrated: while the worker grows a
@@ -389,7 +389,7 @@ public static class CelestialCurves
         // Frame mode reads its pose and current parent BEFORE the buffer exists (the
         // MemoryOwner ownership rule: allocate -> UpdateCachedPoints handoff, with no
         // bail-out path in between — never both dispose and hand off).
-        double now = KSA.Universe.GetElapsedSimTime().Seconds();
+        double now = KSA.Universe.GetElapsedTime().Seconds();
         if (LastStagedFrame.TryGetValue(celestial.Id, out var memo)
             && ReferenceEquals(memo.Curve, curve)
             && memo.NowSeconds.Equals(now)
@@ -456,8 +456,8 @@ public static class CelestialCurves
             for (int i = 0; i < n; i++)
                 span[i] = new KSA.OrbitPointCce(
                     FrameAdapter.ToGame(curve.Coordinates[i]),
-                    new KSA.SimTime(curve.Times[i] - curve.SampleT0),
-                    new KSA.SimTime(curve.Times[i] - curve.SampleT0),
+                    new KSA.UniverseTime(curve.Times[i] - curve.SampleT0),
+                    new KSA.UniverseTime(curve.Times[i] - curve.SampleT0),
                     KSA.TrueAnomaly.NaN);
         }
         else
@@ -467,8 +467,8 @@ public static class CelestialCurves
                 var image = nowPose.FromFrame(curve.Coordinates[i]);
                 span[i] = new KSA.OrbitPointCce(
                     FrameAdapter.ToGame(image - parentNow),
-                    new KSA.SimTime(curve.Times[i] - now),
-                    new KSA.SimTime(curve.Times[i] - now),
+                    new KSA.UniverseTime(curve.Times[i] - now),
+                    new KSA.UniverseTime(curve.Times[i] - now),
                     KSA.TrueAnomaly.NaN);
             }
         }

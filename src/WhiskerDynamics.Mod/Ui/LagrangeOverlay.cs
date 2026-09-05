@@ -39,7 +39,7 @@ public static class LagrangeOverlay
                 return;
             var viewport = Program.MainViewport;
             if (viewport.Mode != CameraMode.Map) return;
-            double now = Universe.GetElapsedSimTime().Seconds();
+            double now = Universe.GetElapsedTime().Seconds();
             if (!FrameManager.TrySamplePose(now, out var pose)) return;
 
             double primaryMu = rails.MuOf(spec.PrimaryId);

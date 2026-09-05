@@ -97,8 +97,8 @@ public sealed class TargetPredictorAuthorityPathTests : IDisposable
     {
         var original = new NavigationTarget
         {
-            Body2Cci = doubleQuat.Identity,
-            BodyRates = new double3(1, 2, 3),
+            Dock2Cci = doubleQuat.Identity,
+            DockFrameRatesCci = new double3(1, 2, 3),
             PositionCci = new double3(-1, -2, -3),
             VelocityCci = new double3(-4, -5, -6),
         };
@@ -124,6 +124,30 @@ public sealed class TargetPredictorAuthorityPathTests : IDisposable
         AssertLiveTargetState(replaced);
     }
 
+    [Fact]
+    public void Navigation_target_keeps_the_docking_port_offset_and_frame()
+    {
+        var offset = new double3(12, -5, 3);
+        var original = new NavigationTarget
+        {
+            Dock2Cci = doubleQuat.Identity,
+            DockFrameRatesCci = new double3(1, 2, 3),
+            PositionCci = _target.Orbit.GetStateVectorsAt(new UniverseTime(Time)).PositionCci + offset,
+            VelocityCci = double3.Zero,
+        };
+
+        Assert.True(NavigationTargetPatch.TryCorrect(
+            _vessels, _rails, _target, _parent, Time,
+            in original, out var corrected, preservePartOffset: true));
+
+        Assert.Equal(30_000_012, corrected.PositionCci.X, 8);
+        Assert.Equal(-4_000_005, corrected.PositionCci.Y, 8);
+        Assert.Equal(3, corrected.PositionCci.Z, 8);
+        Assert.Equal(original.Dock2Cci, corrected.Dock2Cci);
+        Assert.Equal(original.DockFrameRatesCci, corrected.DockFrameRatesCci);
+        Assert.Equal(1_000, corrected.VelocityCci.Y, 8);
+    }
+
     public void Dispose()
     {
         KSA.Program.ControlledVehicle = _previousControlled;
@@ -147,7 +171,7 @@ public sealed class TargetPredictorAuthorityPathTests : IDisposable
         props.Situation = Situation.Freefall;
         VehicleProps.SetValue(vehicle, props);
         var orbit = Orbit.CreateFromStateCci(
-            _parent, new SimTime(Time), position, velocity, default);
+            _parent, new UniverseTime(Time), position, velocity, default);
         Set(VehicleFlightPlan, vehicle, new FlightPlan(orbit, default));
         return vehicle;
     }
@@ -178,9 +202,9 @@ public sealed class TargetPredictorAuthorityPathTests : IDisposable
         Assert.Equal(-500, corrected.VelocityCci.X, 8);
         Assert.Equal(6_000, corrected.VelocityCci.Y, 8);
         Assert.Equal(0, corrected.VelocityCci.Z, 8);
-        Assert.Equal(1, corrected.BodyRates.X, 8);
-        Assert.Equal(2, corrected.BodyRates.Y, 8);
-        Assert.Equal(3, corrected.BodyRates.Z, 8);
+        Assert.Equal(1, corrected.DockFrameRatesCci.X, 8);
+        Assert.Equal(2, corrected.DockFrameRatesCci.Y, 8);
+        Assert.Equal(3, corrected.DockFrameRatesCci.Z, 8);
     }
 
     private static void AssertPredictorTargetState(NavigationTarget corrected)

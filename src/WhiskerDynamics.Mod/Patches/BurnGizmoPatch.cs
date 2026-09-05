@@ -33,7 +33,7 @@ internal static class BurnGizmoPatch
 
     internal static void ResetSessionStatics() => System.Threading.Volatile.Write(ref _activeLogged, 0);
 
-    static void Postfix(Burn __instance, Viewport inViewport)
+    static void Postfix(Burn __instance, IViewport inViewport)
     {
         if (!ModServices.Enabled) return;
         try
@@ -47,7 +47,7 @@ internal static class BurnGizmoPatch
             // frame or a body-centred inertial frame, no counter-pose — keep the
             // stock-position fallback.
             // Parent-eject burns anchor to the celestial's orbit and stay stock's.
-            if (!FrameManager.InertialView && !__instance.ParentEjectBurn
+            if (!FrameManager.InertialView && !__instance.ParentDepartureBurn
                 && OverlayBuffer.Read(__instance.Vehicle.Id) is not null
                 && !BurnNodePatch.TryDrawnBurnPosition(__instance, out _))
             {

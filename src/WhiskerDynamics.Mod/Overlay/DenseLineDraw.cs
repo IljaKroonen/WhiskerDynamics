@@ -9,7 +9,7 @@ namespace WhiskerDynamics.Mod.Overlay;
 /// growable vertex append, no length limit — instead of squeezing through stock's
 /// 2000-point Orbit.DrawLines (which stackallocs its whole strip, Orbit.cs:2182, so
 /// it can never take a dense batch). Mirrors the exact subset of DrawLines semantics
-/// the mod's call shapes reach: startTime is always SimTime.Zero (no per-point
+/// the mod's call shapes reach: startTime is always UniverseTime.Zero (no per-point
 /// re-anchor), joinEnds is always false (open arcs — no closing chord), payload
 /// TrueAnomaly is always NaN (the burn-window color split never triggers), and the
 /// batch times are linear (no bound-orbit wrap in the splice search). Kept from
@@ -44,9 +44,9 @@ internal static class DenseLineDraw
     /// the caller's stack chunk and flushes full chunks — a ref struct because local
     /// functions cannot capture spans, and two hand-copied flush blocks would let a
     /// chunk-boundary bug ship on exactly one of the two vertex kinds.</summary>
-    private ref struct ChunkEmitter(Viewport viewport, Span<float3> positions, Span<byte4> colors)
+    private ref struct ChunkEmitter(IViewport viewport, Span<float3> positions, Span<byte4> colors)
     {
-        private readonly Viewport _viewport = viewport;
+        private readonly IViewport _viewport = viewport;
         private readonly Span<float3> _positions = positions;
         private readonly Span<byte4> _colors = colors;
         private int _filled;
@@ -75,7 +75,7 @@ internal static class DenseLineDraw
     /// <paramref name="minimumTimeSeconds"/> clips a planned ghost's elapsed prefix
     /// without copying its immutable arrays. <paramref name="framePositions"/> is
     /// read exactly when <paramref name="ctx"/>.Framed (one sweep, one mode).</summary>
-    internal static void Draw(Viewport viewport, Orbit orbit,
+    internal static void Draw(IViewport viewport, Orbit orbit,
         double[] times, Vector3d[] positions, Vector3d[]? framePositions,
         DecimationMetrics metricsDrawn, DecimationMetrics metricsCce,
         in TrajectoryOverlay.StagingContext ctx, byte4 color,
@@ -118,7 +118,7 @@ internal static class DenseLineDraw
         // line). Arc lengths and significance were precomputed on the worker in
         // SAMPLED drawn space; the frame re-embed is a similarity (rotation + ONE
         // uniform scale), so a single chord calibrates them to drawn meters.
-        double pxPerRadian = camera.GetObjectDiameterPixelsFrac(0.02, 1.0) / (2.0 * Math.Atan(0.01));
+        double pxPerRadian = camera.GetObjectDiameterPixels(0.02, 1.0) / (2.0 * Math.Atan(0.01));
         if (!(pxPerRadian > 0) || !double.IsFinite(pxPerRadian)) pxPerRadian = 1000.0;
         bool framed = ctx.Framed;
         // The metrics must match the array the vertices come from: a framed BATCH

@@ -159,7 +159,7 @@ public static class FramesPanel
         {
             _horizonReadoutMs = nowMs;
             string readout = $"orbit minimum: {TimeDisplayKernel.FormatDuration(config.OverlayHorizonDays * 86400.0, years: true)}";
-            double now = KSA.Universe.GetElapsedSimTime().Seconds();
+            double now = KSA.Universe.GetElapsedTime().Seconds();
             _trajectoryProgress = FrameSelectorKernel.FutureComputationProgress(
                 rails.AvailableAheadDays(now), CelestialCurves.CompletedWindowDays(active?.Label),
                 config.RailsAheadDays, config.OverlayHorizonDays, config.CelestialCurveDays,

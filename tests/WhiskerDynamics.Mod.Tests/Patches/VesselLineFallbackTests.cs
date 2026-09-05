@@ -393,24 +393,24 @@ public class VesselLineFallbackTests
     private static OrbitPointCce[] StockPoints(double seed) =>
     [
         new(new double3(seed + 0.125, -seed - 0.25, seed + 0.5),
-            new SimTime(seed + 10.25), new SimTime(seed + 100.5),
+            new UniverseTime(seed + 10.25), new UniverseTime(seed + 100.5),
             new TrueAnomaly(-2.75), inDangerZone: true),
         new(new double3(-seed - 1.125, seed + 1.25, -seed - 1.5),
-            new SimTime(seed + 20.5), new SimTime(seed + 200.75),
+            new UniverseTime(seed + 20.5), new UniverseTime(seed + 200.75),
             new TrueAnomaly(0.125), inDangerZone: false),
         // A wrapped payload and second danger run exercise UpdateCachedPoints'
         // derived line metadata as well as every OrbitPointCce field.
         new(new double3(seed + 2.125, seed + 2.25, seed + 2.5),
-            new SimTime(-seed - 30.75), new SimTime(seed + 300.875),
+            new UniverseTime(-seed - 30.75), new UniverseTime(seed + 300.875),
             new TrueAnomaly(5.75), inDangerZone: true),
     ];
 
     private static OrbitPointCce[] ModPoints(double seed) =>
     [
         new(new double3(seed + 0.5, seed + 1.5, seed + 2.5),
-            new SimTime(seed + 3.5), new SimTime(seed + 4.5), TrueAnomaly.NaN),
+            new UniverseTime(seed + 3.5), new UniverseTime(seed + 4.5), TrueAnomaly.NaN),
         new(new double3(-seed - 5.5, -seed - 6.5, -seed - 7.5),
-            new SimTime(seed + 8.5), new SimTime(seed + 9.5), TrueAnomaly.NaN,
+            new UniverseTime(seed + 8.5), new UniverseTime(seed + 9.5), TrueAnomaly.NaN,
             inDangerZone: true),
     ];
 

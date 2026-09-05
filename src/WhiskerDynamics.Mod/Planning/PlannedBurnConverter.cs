@@ -147,7 +147,7 @@ internal static class PlannedBurnConverter
             if (patch is null) return "no stock patch resolves for this burn";
             if (patch.Orbit.Parent is not { } patchParent)
                 return "stock patch has no parent body";
-            var conicState = patch.Orbit.GetStateVectorsAt(new SimTime(burnTimeSeconds));
+            var conicState = patch.Orbit.GetStateVectorsAt(new UniverseTime(burnTimeSeconds));
             var cci2Cce = patchParent.GetCci2Cce();
             Vector3d rConic = FrameAdapter.CciToEcl(conicState.PositionCci, cci2Cce);
             Vector3d vConic = FrameAdapter.CciToEcl(conicState.VelocityCci, cci2Cce);
@@ -503,7 +503,7 @@ internal static class PlannedBurnConverter
         try
         {
             PatchedConic? patch = BurnPlanWriter.ResolvePlanningPatch(
-                vehicle, new SimTime(burnTimeSeconds));
+                vehicle, new UniverseTime(burnTimeSeconds));
             if (patch?.Orbit.Parent is Astronomical patchParent) patchParentId = patchParent.Id;
         }
         catch (Exception e)
