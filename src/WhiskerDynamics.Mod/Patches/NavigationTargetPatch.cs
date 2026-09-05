@@ -17,7 +17,7 @@ internal static class NavigationTargetPatch
         System.Threading.Interlocked.Exchange(ref _nextErrorLogMs, 0);
     }
 
-    static void Postfix(IOrbiter? target, IParentBody myParent, SimTime time,
+    static void Postfix(IOrbiter? target, Part? targetPart, IParentBody myParent, UniverseTime time,
         ref NavigationTarget? __result)
     {
         if (!__result.HasValue || target is null || !ModServices.Enabled) return;
@@ -26,7 +26,8 @@ internal static class NavigationTargetPatch
             if (!ModServices.EnsureBound(out var services)) return;
             double t = time.Seconds();
             if (!TryCorrect(services.Vessels, services.Rails, target, myParent,
-                    t, __result.Value, out var corrected)) return;
+                    t, __result.Value, out var corrected,
+                    preservePartOffset: targetPart is not null)) return;
             __result = corrected;
 
             if (System.Threading.Interlocked.CompareExchange(ref _pathLogged, 1, 0) == 0)
@@ -42,10 +43,26 @@ internal static class NavigationTargetPatch
         }
     }
 
+    private static double3 StockPositionCci(
+        IOrbiter target, IParentBody myParent, UniverseTime time)
+    {
+        StateVectors state = target.Orbit.GetStateVectorsAt(time);
+        if (target.Parent == myParent) return state.PositionCci;
+        double3 targetParentPosition = target.Parent is IOrbiter targetParent
+            ? targetParent.GetPositionEcl(time)
+            : target.Parent.GetPositionEcl();
+        double3 myParentPosition = myParent is IOrbiter parent
+            ? parent.GetPositionEcl(time)
+            : myParent.GetPositionEcl();
+        double3 targetPosition = targetParentPosition
+            + state.PositionCci.Transform(target.Parent.GetCci2Cce());
+        return (targetPosition - myParentPosition).Transform(myParent.GetCce2Cci());
+    }
+
     internal static bool TryCorrect(
         VesselRegistry vessels, RailsService rails, IOrbiter target,
         IParentBody myParent, double time, in NavigationTarget original,
-        out NavigationTarget corrected)
+        out NavigationTarget corrected, bool preservePartOffset = false)
     {
         corrected = original;
         if (!double.IsFinite(time)
@@ -74,6 +91,9 @@ internal static class NavigationTargetPatch
             in targetAbsolute, in parentAbsolute);
         doubleQuat cce2Cci = myParent.GetCce2Cci();
         corrected.PositionCci = FrameAdapter.EclToCci(relative.Position, cce2Cci);
+        if (preservePartOffset)
+            corrected.PositionCci += original.PositionCci
+                - StockPositionCci(target, myParent, new UniverseTime(time));
         corrected.VelocityCci = FrameAdapter.EclToCci(relative.Velocity, cce2Cci);
         return true;
     }

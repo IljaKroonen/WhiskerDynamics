@@ -202,7 +202,7 @@ public static class BurnPlannerPanel
         bool cadenceDue = Environment.TickCount64 >= _nextBasisUpkeepMs;
         if (!cadenceDue && !BasisReconversionUrgency.Any) return;
         if (cadenceDue) _nextBasisUpkeepMs = Environment.TickCount64 + 1000;
-        double now = Universe.GetElapsedSimTime().Seconds();
+        double now = Universe.GetElapsedTime().Seconds();
         var upkeep = FlightPlans.SnapshotForUpkeep();
         ClearOrphanedUrgency(upkeep);
         foreach (var (vesselId, plan) in upkeep)
@@ -391,7 +391,7 @@ public static class BurnPlannerPanel
                     return;
                 }
 
-                double now = Universe.GetElapsedSimTime().Seconds();
+                double now = Universe.GetElapsedTime().Seconds();
                 var burns = BurnsForFrame(vehicle);
                 var plan = FlightPlans.TryGet(vehicle.Id);
 
@@ -492,7 +492,7 @@ public static class BurnPlannerPanel
     internal static string PlanBurnForGameTest(VesselRegistry vessels,
         Vehicle vehicle, double burnTime, FrameSpec? frame, Vector3d components)
     {
-        double now = Universe.GetElapsedSimTime().Seconds();
+        double now = Universe.GetElapsedTime().Seconds();
         IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vehicle);
         FlightPlanModel? plan = FlightPlans.TryGet(vehicle.Id);
         bool created = false;
@@ -521,7 +521,7 @@ public static class BurnPlannerPanel
         if (FlightPlans.TryGet(vehicle.Id) is not null)
             return "rejected: flight plan already exists";
         CreatePlanAdoptingBurns(vehicle, BurnPlanWriter.Snapshot(vehicle),
-            Universe.GetElapsedSimTime().Seconds());
+            Universe.GetElapsedTime().Seconds());
         _status = "plan created";
         InvalidateAnalysis();
         return _status;
@@ -568,7 +568,7 @@ public static class BurnPlannerPanel
     internal static string AddPlaceholderBurnForGameTest(
         VesselRegistry vessels, Vehicle vehicle, FrameSpec frame)
     {
-        double now = Universe.GetElapsedSimTime().Seconds();
+        double now = Universe.GetElapsedTime().Seconds();
         IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vehicle);
         FlightPlanModel? plan = FlightPlans.TryGet(vehicle.Id);
         if (plan is null)
@@ -593,7 +593,7 @@ public static class BurnPlannerPanel
         TrackedVessel? tracked = vessels.TryGetTracked(vehicle.Id);
         if (tracked is null)
             return "rejected: vessel is not tracked";
-        double now = Universe.GetElapsedSimTime().Seconds();
+        double now = Universe.GetElapsedTime().Seconds();
         // Same admission the panel's time editor applies before TryEditTime.
         if (plan.RejectOutsideWindow(newTime, now,
                 AvailableRailsDays(tracked, now)) is { } outside)
@@ -638,7 +638,7 @@ public static class BurnPlannerPanel
         IReadOnlyList<Burn> burns = BurnPlanWriter.Snapshot(vehicle);
         EditComponents(vessels, vehicle, vessels.TryGetTracked(vehicle.Id),
             vehicle.Orbit, plan, burns, burn, meta, components,
-            Universe.GetElapsedSimTime().Seconds());
+            Universe.GetElapsedTime().Seconds());
         InvalidateAnalysis();
         return _status;
     }
@@ -656,7 +656,7 @@ public static class BurnPlannerPanel
 
         Rebase(vessels, vehicle, tracked, vehicle.Orbit, plan,
             BurnPlanWriter.Snapshot(vehicle),
-            Universe.GetElapsedSimTime().Seconds());
+            Universe.GetElapsedTime().Seconds());
         return _status;
     }
 
@@ -957,7 +957,7 @@ public static class BurnPlannerPanel
                 "engine or mass configuration changed while nodes were being built");
             return;
         }
-        double now = Universe.GetElapsedSimTime().Seconds();
+        double now = Universe.GetElapsedTime().Seconds();
         var departureLead = RendezvousApplyPolicy.CheckDepartureLead(
             result.DepartureTime, result.DepartureDvEcl.Length(), job.Finite,
             now, PlannerKernel.MinLeadSeconds);
@@ -1040,7 +1040,7 @@ public static class BurnPlannerPanel
             // Presence of burn one does not mean stock's chained timeline worker has
             // finished. Never let BurnPlanWriter fall back to the unburned base patch
             // for burn two: wait until the post-burn timeline covers arrival.
-            var arrival = new SimTime(result.ArrivalTime);
+            var arrival = new UniverseTime(result.ArrivalTime);
             var arrivalPatch = vehicle.FlightComputer.BurnPlan.TryGetValidTimeLinePatch(arrival);
             if (arrivalPatch is null)
             {
@@ -1969,7 +1969,7 @@ public static class BurnPlannerPanel
         // Under time warp the finite IGNITION may have slipped into the flight
         // computer's lead window even while its centered node remains ahead. Gate
         // the exact model start published with the result before any stock write.
-        double simNow = Universe.GetElapsedSimTime().Seconds();
+        double simNow = Universe.GetElapsedTime().Seconds();
         if (!OptimizeApplyPolicy.ModeledStartHasLead(
                 job.AcceptedModelStartSeconds, simNow, PlannerKernel.MinLeadSeconds))
         {

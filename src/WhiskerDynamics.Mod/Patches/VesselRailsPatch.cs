@@ -10,7 +10,7 @@ namespace WhiskerDynamics.Mod.Patches;
 /// Patching this large, non-inline-marked caller (instead of the AggressiveInlining
 /// evaluators it wraps) is the inlining-risk mitigation; the commit canary proves
 /// the effect end-to-end.</summary>
-[HarmonyPatch(typeof(VehicleUpdateTask), "ApplySingleVehicleMotion")]
+[HarmonyPatch(typeof(PhysicsBubble), "ApplySingleVehicleMotion")]
 internal static class VesselRailsPatch
 {
     // One-shot in-game evidence that THIS path staged an override (whiskerdynamics.log is the
@@ -32,7 +32,7 @@ internal static class VesselRailsPatch
         return __state.RunOriginal;
     }
 
-    static void Postfix(VehicleUpdateTask __instance, VehicleUpdateState vehicleState)
+    static void Postfix(PhysicsBubble __instance, VehicleUpdateState vehicleState)
     {
         if (!ModServices.Enabled)
             return;
@@ -91,7 +91,7 @@ internal static class VesselRailsPatch
             }
 
             var currentOrbit = vehicleState.CurrentOrbit;
-            SimTime nextTime = __instance.SimStep.NextTime;
+            UniverseTime nextTime = __instance.SimStep.NextTime;
             // Evaluates the predictor, books the conic-drift readout (n-body departure
             // from the stock conic since its last re-derivation — the osculating-refresh
             // trigger below), and applies the teleport-jump reseed guard.
@@ -134,7 +134,7 @@ internal static class VesselRailsPatch
                 vehicleState.SetCurrentOrbit(freshOrbit, vehicleState.ReadOnlyVehicle.Hash);
                 if (soiParent is not null)
                 {
-                    // Mirror stock's own rails patch transition (VehicleUpdateTask.cs:856):
+                    // Mirror stock's own rails patch transition (PhysicsBubble.cs:856):
                     // the physics environment keys terrain, physics radius and situation
                     // handling off ClosestParent.
                     newStates.SetClosestParent(orbitParent);

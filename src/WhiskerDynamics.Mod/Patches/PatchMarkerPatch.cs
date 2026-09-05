@@ -68,7 +68,7 @@ internal static class PatchMarkerPatch
             // matters — stock's markers there sit on DrawStalePatch0's stock-style
             // line, the same pairing stock always had.
             long nowMs = Environment.TickCount64;
-            double nowSimSeconds = Universe.GetElapsedSimTime().Seconds();
+            double nowSimSeconds = Universe.GetElapsedTime().Seconds();
             bool lineUsable = OverlayBuffer.LineSamplesUsable(
                 vehicle.Id, samples, planned: false, nowMs, nowSimSeconds);
             if (ownPlanPatch && index == 0 && !lineUsable && FrameManager.InertialView

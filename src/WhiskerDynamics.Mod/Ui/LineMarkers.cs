@@ -42,7 +42,7 @@ public static class LineMarkers
             var camera = viewport.GetCamera();
             var drawList = ImGui.GetBackgroundDrawList();
             long nowMs = Environment.TickCount64;
-            double nowSimSeconds = Universe.GetElapsedSimTime().Seconds();
+            double nowSimSeconds = Universe.GetElapsedTime().Seconds();
             DrawBatch(OverlayBuffer.ReadFresh(vehicle.Id, nowMs, nowSimSeconds),
                 nowSimSeconds, viewport, camera, drawList,
                 (byte4)FlightPlan.FirstPatchColor);
@@ -57,7 +57,7 @@ public static class LineMarkers
     }
 
     private static void DrawBatch(OverlaySamples? samples, double nowSimSeconds,
-        Viewport viewport, Camera camera, ImDrawListPtr drawList, byte4 color)
+        IViewport viewport, Camera camera, ImDrawListPtr drawList, byte4 color)
     {
         if (samples is null || samples.Markers.Count == 0) return;
         if (!TrajectoryOverlay.TryBuildMarkerDrawContext(samples, out var context)) return;

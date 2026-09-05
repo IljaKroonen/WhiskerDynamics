@@ -9,7 +9,7 @@ namespace WhiskerDynamics.Mod.Patches;
 /// each follower's staged Origin.Time (set by the stock path to the substep next-time),
 /// so the ref-struct PhysicsContext parameter is never touched. The shared cluster
 /// origin staged by stock is deliberately left alone.</summary>
-[HarmonyPatch(typeof(VehicleUpdateTask), "FullPhysicsUnconstrainedStep")]
+[HarmonyPatch(typeof(PhysicsBubble), "FullPhysicsUnconstrainedStep")]
 internal static class ClusterFollowerRailsPatch
 {
     // One-shot in-game evidence that THIS path staged an override (whiskerdynamics.log is the
@@ -72,7 +72,7 @@ internal static class ClusterFollowerRailsPatch
                 }
 
                 var currentOrbit = vehicleState.CurrentOrbit;
-                SimTime t = newStates.Origin.Time;
+                UniverseTime t = newStates.Origin.Time;
                 StateVectors sv = vessels.EvaluateForStaging(vehicleState, tracked, t);
                 if (vehicleState.UpdateData.NewFlightPlan != null)
                 {

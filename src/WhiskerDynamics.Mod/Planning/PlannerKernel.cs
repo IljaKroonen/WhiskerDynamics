@@ -45,7 +45,7 @@ public static class PlannerKernel
         return patchFound ? Verdict.Ok : Verdict.NoPatch;
     }
 
-    /// <summary>Admission checks that do not require constructing a stock SimTime or
+    /// <summary>Admission checks that do not require constructing a stock UniverseTime or
     /// asking the stock plan for a patch. TryAdd runs these first so NaN/infinite,
     /// too-near, and occupied time slots never enter stock lookup code.</summary>
     public static Verdict ValidateAddTiming(double burnTime, double now,

@@ -7,9 +7,9 @@ namespace WhiskerDynamics.Mod.Frames;
 /// only — offline-testable without KSA.dll, the FrameAdapter/MapPoseKernel precedent).
 /// The game's body-fixed orientation is, per the decompiled sources:
 ///
-///   Celestial.cs:547-551  GetCcf2Cci(SimTime t) = doubleQuat.CreateFromAxisAngle(
+///   Celestial.cs:547-551  GetCcf2Cci(UniverseTime t) = doubleQuat.CreateFromAxisAngle(
 ///                         double3.UnitZ, t.Seconds() * AngularVelocity + InitialRotation)
-///   Celestial.cs:560-563  GetCcf2Cce(SimTime t) = doubleQuat.Concatenate(
+///   Celestial.cs:560-563  GetCcf2Cce(UniverseTime t) = doubleQuat.Concatenate(
 ///                         GetCcf2Cci(t), _cci2Cce)
 ///   Celestial.cs:585      _cci2Cce = Concatenate(Orbit.GetParentCce2Orb(), Orb2Cci)
 ///                         .Inverse() — a fixed composition of defining-conic

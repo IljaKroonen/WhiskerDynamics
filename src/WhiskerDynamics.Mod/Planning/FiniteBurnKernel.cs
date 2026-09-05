@@ -1,7 +1,7 @@
 namespace WhiskerDynamics.Mod.Planning;
 
 /// <summary>Engine/mass scalars captured from the stock flight computer at snapshot
-/// time (TotalMassPropsBody.Mass and the ActiveEngineThrust/ActiveEngineMassFlowRate
+/// time (TotalMassPropsBody.Mass and the ActiveEnginePerformanceMax
 /// performance sums): everything the
 /// finite-burn estimate needs, and nothing main-thread-bound — the rails worker only
 /// ever sees these three numbers. Zeroed or absent scalars

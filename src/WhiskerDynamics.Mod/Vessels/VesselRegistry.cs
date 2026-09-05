@@ -363,7 +363,7 @@ public sealed class VesselRegistry
     /// moved discontinuously under the same vehicle instance, so the predictor is
     /// reseeded from the game state. Called by both rail patches after
     /// <see cref="GetOrSeed"/>.</summary>
-    public StateVectors EvaluateForStaging(VehicleUpdateState vehicleState, TrackedVessel tracked, SimTime time)
+    public StateVectors EvaluateForStaging(VehicleUpdateState vehicleState, TrackedVessel tracked, UniverseTime time)
     {
         var currentOrbit = vehicleState.CurrentOrbit;
         StateVectors stock = vehicleState.CurrentStateVectors;
@@ -382,7 +382,7 @@ public sealed class VesselRegistry
                 // after this returns. The CONIC must be healed HERE too, not left to
                 // the single-vessel path's re-osculation refresh: transition ticks
                 // route through ApplyFullPhysics (ApplySingleVehicleMotion delegates
-                // when Patch.EndTime is crossed, VehicleUpdateTask.cs:513-524), whose
+                // when Patch.EndTime is crossed, PhysicsBubble.cs:513-524), whose
                 // staging path never refreshes — overridden vectors riding the
                 // Kepler-anchored patch orbit would re-stage the snap from the conic
                 // next tick, against a drift baseline the same-tick second staging
@@ -439,12 +439,12 @@ public sealed class VesselRegistry
     /// decision itself is <see cref="SoiReparentKernel.Decide"/> at exact SOI radii):
     /// the new parent when the vessel is inside a child's SOI or outside its
     /// parent's, null to keep. Stock's own on-rails transition fires only through the
-    /// flight plan's patch schedule (VehicleUpdateTask.cs:845-867), whose encounters
+    /// flight plan's patch schedule (PhysicsBubble.cs:845-867), whose encounters
     /// are conic-extrapolation-vs-Kepler-body predictions — an n-body trajectory that
     /// bends into an encounter those miss keeps the stale parent all the way to the
     /// child's surface. Candidates include every finite-SOI modeled gravity source;
     /// a re-parent retains the same absolute authoritative predictor.</summary>
-    public Astronomical? RailsSoiParent(TrackedVessel tracked, Orbit currentOrbit, SimTime time)
+    public Astronomical? RailsSoiParent(TrackedVessel tracked, Orbit currentOrbit, UniverseTime time)
     {
         double t = time.Seconds();
         // GetOrSeed guaranteed an integrated Astronomical parent this tick; Orbit.Parent

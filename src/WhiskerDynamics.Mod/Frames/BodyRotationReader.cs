@@ -5,7 +5,7 @@ namespace WhiskerDynamics.Mod.Frames;
 
 /// <summary>Activation-time reader of a live body's spin model — the body-surface
 /// frame's only game seam. Reads the PUBLIC time-parameterized orientation surface:
-/// <c>IParentBody.GetCcf2Cce(SimTime)</c> (IParentBody.cs:31 — Celestial.cs:560
+/// <c>IParentBody.GetCcf2Cce(UniverseTime)</c> (IParentBody.cs:31 — Celestial.cs:560
 /// implements the spin-then-tilt composition SurfaceFrameKernel documents;
 /// StellarBody.cs:126 returns Identity) and <c>IParentBody.GetAngularVelocity()</c>
 /// (IParentBody.cs:68 — Celestial.cs:196 returns the template spin rate,
@@ -13,7 +13,7 @@ namespace WhiskerDynamics.Mod.Frames;
 /// <see cref="BodyRotation"/> and VERIFIES the reconstruction against the game's own
 /// quaternion at a second sample time (tRef + 1 h): any drift in the assumed-constant
 /// tilt, a changed game formula, or a quaternion-convention surprise refuses activation
-/// with a panel-ready reason instead of rendering a wrong frame. The SimTime-
+/// with a panel-ready reason instead of rendering a wrong frame. The UniverseTime-
 /// parameterized overload is verified rather than the cached GetBodyFixed2Ecl()
 /// (Celestial.cs:186-189): the cache is stamped at Orbit.StateVectors.StateTime
 /// (Celestial.cs:589-590), which lags 'now' under warp — same composition, stale time.
@@ -53,7 +53,7 @@ internal static class BodyRotationReader
                 || astronomical is not IParentBody parentBody) continue;
             try
             {
-                var q = parentBody.GetCcf2Cce(new SimTime(CatalogKernel.ReferenceEpochSeconds));
+                var q = parentBody.GetCcf2Cce(new UniverseTime(CatalogKernel.ReferenceEpochSeconds));
                 var pole = FrameAdapter.ToCore(Brutal.Numerics.double3.Transform(
                     Brutal.Numerics.double3.UnitZ, q));
                 double length = pole.Length();
@@ -103,7 +103,7 @@ internal static class BodyRotationReader
         }
         if (body is null) return $"'{bodyId}' has no live rotation state";
         double angularVelocity = body.GetAngularVelocity();
-        var qRef = body.GetCcf2Cce(new SimTime(referenceTime));
+        var qRef = body.GetCcf2Cce(new UniverseTime(referenceTime));
         model = SurfaceFrameKernel.ModelFromGameQuat(qRef, angularVelocity, referenceTime);
         // Tolerance gate first (FrameKernel.Surface throws on an EXACT zero pole only —
         // a degenerate live quaternion must refuse with a reason, not throw).
@@ -113,6 +113,6 @@ internal static class BodyRotationReader
         // re-embedding at sample times) relies on.
         double tCheck = referenceTime + VerifyIntervalSeconds;
         return SurfaceFrameKernel.VerifyReconstruction(
-            model, body.GetCcf2Cce(new SimTime(tCheck)), tCheck);
+            model, body.GetCcf2Cce(new UniverseTime(tCheck)), tCheck);
     }
 }

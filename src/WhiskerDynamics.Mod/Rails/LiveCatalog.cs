@@ -7,7 +7,7 @@ namespace WhiskerDynamics.Mod.Rails;
 /// <see cref="CelestialSystem"/>), replacing the Astronomicals.xml guess — the game's
 /// objects are ground truth for whatever catalog the save loaded (SolSystem.xml,
 /// SolSystemDense.xml, ...). DETERMINISM: only the DEFINING conic is read —
-/// <c>Orbit.GetStateVectorsAt(SimTime)</c> is pure element math off the conic's
+/// <c>Orbit.GetStateVectorsAt(UniverseTime)</c> is pure element math off the conic's
 /// OrbitData (Orbit.cs:1966: time→mean→true anomaly, perifocal state, Orb2ParentCci),
 /// never the propagated <c>Orbit.StateVectors</c> cache — evaluated at the fixed
 /// reference epoch t = 0, so every rebind snapshots identical records and rails from
@@ -49,14 +49,14 @@ internal static class LiveCatalog
             // The zonal field needs only the fixed spin pole.  Reading it from the
             // game's own body-fixed orientation avoids duplicating tilt conventions.
             var rotation = SurfaceFrameKernel.ModelFromGameQuat(
-                parentBody.GetCcf2Cce(new SimTime(CatalogKernel.ReferenceEpochSeconds)),
+                parentBody.GetCcf2Cce(new UniverseTime(CatalogKernel.ReferenceEpochSeconds)),
                 parentBody.GetAngularVelocity(), CatalogKernel.ReferenceEpochSeconds);
             if (astronomical is Celestial celestial
                 && celestial.Orbit is { } orbit && orbit.Parent is { } parent)
             {
                 parentId = parent.Id;
                 // Defining conic at the fixed epoch; parent-relative Cci axes.
-                var sv = orbit.GetStateVectorsAt(new SimTime(CatalogKernel.ReferenceEpochSeconds));
+                var sv = orbit.GetStateVectorsAt(new UniverseTime(CatalogKernel.ReferenceEpochSeconds));
                 // Cci -> ecliptic axes: the same registered conversion TrackedVessel.Reseed
                 // uses (GetCci2Cce is a fixed composition of defining-conic orientations,
                 // constant in time — root Cce axes ARE the mod's ecliptic axes).

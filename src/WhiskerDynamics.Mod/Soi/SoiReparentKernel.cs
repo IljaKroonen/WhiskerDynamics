@@ -5,9 +5,9 @@ namespace WhiskerDynamics.Mod.Soi;
 /// <summary>Rails-geometric SOI parenting decision (KSA-free; the registry translates
 /// game state to these inputs). Stock re-parents an on-rails vessel only through its
 /// flight plan's patch schedule (the Freefall branch's patch-EndTime jump,
-/// decompiled VehicleUpdateTask.cs:845-867 — the geometric check,
+/// decompiled PhysicsBubble.cs:845-867 — the geometric check,
 /// PhysicsStates.CheckSoiTransitions at PhysicsStates.cs:487, runs on LIVE substeps
-/// only, VehicleUpdateTask.cs:816/884), and those patches are
+/// only, PhysicsBubble.cs:816/884), and those patches are
 /// conic-extrapolation-vs-Kepler-body predictions — an n-body trajectory that bends
 /// into an encounter the extrapolation misses keeps the stale parent arbitrarily deep
 /// into the child's SOI (observed: Earth-parented at 2 km above Luna). This kernel

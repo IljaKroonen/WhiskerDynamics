@@ -9,7 +9,7 @@ namespace WhiskerDynamics.Mod.Patches;
 /// that the Seam 1 postfixes actually take effect — if the small AggressiveInlining
 /// evaluators were reached through a path our patched callers do not cover, the
 /// committed states drift off the predictor and the mod disables itself loudly.</summary>
-[HarmonyPatch(typeof(Vehicle), nameof(Vehicle.UpdateFromTaskResults))]
+[HarmonyPatch(typeof(Vehicle), nameof(Vehicle.UpdateFromTaskResultsUnsynchronized))]
 internal static class CommitCanaryPatch
 {
     static void Postfix(Vehicle __instance)

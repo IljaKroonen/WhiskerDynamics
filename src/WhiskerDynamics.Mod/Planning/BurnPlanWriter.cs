@@ -112,7 +112,7 @@ public static class BurnPlanWriter
     /// <summary>THE planning-side patch resolution, mirroring stock click-to-place.
     /// Runs inside the burn preservation scope so every planning seam resolves the
     /// same extended conic past a stock impact prediction.</summary>
-    internal static PatchedConic? ResolvePlanningPatch(Vehicle vehicle, SimTime time)
+    internal static PatchedConic? ResolvePlanningPatch(Vehicle vehicle, UniverseTime time)
     {
         using (Patches.BurnPlanCalculationContext.EnterForVehicle(vehicle))
             return vehicle.FlightComputer.BurnPlan.TryGetValidTimeLinePatch(time)
@@ -130,7 +130,7 @@ public static class BurnPlanWriter
             // or queueing a Burn; TryEditDv enforces the same invariant.
             if (!PlannerKernel.ValidateDv(dvVlf.X, dvVlf.Y, dvVlf.Z))
                 return PlannerKernel.Describe(PlannerKernel.Verdict.NotFinite);
-            double now = Universe.GetElapsedSimTime().Seconds();
+            double now = Universe.GetElapsedTime().Seconds();
             var existing = Snapshot(vehicle);
             var times = new List<double>(existing.Count);
             foreach (var b in existing) times.Add(b.Time.Seconds());
@@ -139,8 +139,8 @@ public static class BurnPlanWriter
                 return PlannerKernel.Describe(verdict);
 
             // Only a time that passed every KSA-free admission check may enter
-            // SimTime construction and stock patch resolution.
-            var time = new SimTime(burnTimeSeconds);
+            // UniverseTime construction and stock patch resolution.
+            var time = new UniverseTime(burnTimeSeconds);
             PatchedConic? patch = ResolvePlanningPatch(vehicle, time);
             if (patch is null)
                 return PlannerKernel.Describe(PlannerKernel.Verdict.NoPatch);
@@ -178,15 +178,15 @@ public static class BurnPlanWriter
         try
         {
             if (RejectIfOffMainThread() is { } wrongThread) return wrongThread;
-            double now = Universe.GetElapsedSimTime().Seconds();
+            double now = Universe.GetElapsedTime().Seconds();
             var others = new List<double>();
             foreach (var b in Snapshot(vehicle))
                 if (!ReferenceEquals(b, burn)) others.Add(b.Time.Seconds());
             var verdict = PlannerKernel.ValidateTimeEdit(newTimeSeconds, now, others);
             if (verdict != PlannerKernel.Verdict.Ok) return PlannerKernel.Describe(verdict);
             double oldTimeSeconds = burn.Time.Seconds();
-            SimTime oldTime = burn.Time;
-            ApplyTransactional(oldTime, new SimTime(newTimeSeconds),
+            UniverseTime oldTime = burn.Time;
+            ApplyTransactional(oldTime, new UniverseTime(newTimeSeconds),
                 value => burn.Time = value,
                 () => burn.Update(vehicle.FlightComputer)); // queues BurnUpdated dirty event
             FlightPlans.TryGet(vehicle.Id)?.SnapshotMoveBurnDeferred(

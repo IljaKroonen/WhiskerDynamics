@@ -27,6 +27,8 @@ The governing constraints are in [the design cornerstones](docs/design.md).
 
 ## Build and test
 
+The current target is KSA `2026.9.7.5402`.
+
 Mod-layer projects require a KSA installation. The default path is
 `C:\Program Files\Kitten Space Agency`; override it with `KsaInstallDir` or
 `KSA_INSTALL_DIR`. StarMap defaults to `%LOCALAPPDATA%\StarMap`; override it with

@@ -93,7 +93,7 @@ internal static class SoiEncounterPlanAuthorityPatch
     internal static void ResetSessionStatics() =>
         System.Threading.Volatile.Write(ref _pathLogged, 0);
 
-    static bool Prefix(PatchedConic __instance, ref SimTime expiryGameTime, ref bool __result)
+    static bool Prefix(PatchedConic __instance, ref UniverseTime expiryGameTime, ref bool __result)
     {
         if (!SoiPlanAuthorityContext.Active) return true;
         // Keep a finite verification horizon so an unexpected global disable cannot

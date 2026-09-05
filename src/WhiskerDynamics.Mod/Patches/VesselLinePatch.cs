@@ -156,7 +156,7 @@ internal static class VesselLinePatch
 
     private readonly struct ProductionActualLineOperations(
         Vehicle vehicle,
-        Viewport viewport,
+        IViewport viewport,
         Orbit orbit,
         OverlaySamples samples,
         bool isActive,
@@ -301,7 +301,7 @@ internal static class VesselLinePatch
         PlannedCanvas.Clear();
     }
 
-    static bool Prefix(FlightPlan __instance, Viewport viewport, IOrbiter orbiter, bool isActive,
+    static bool Prefix(FlightPlan __instance, IViewport viewport, IOrbiter orbiter, bool isActive,
         bool drawVehiclePosition, TrueAnomaly startTa, TrueAnomaly nextBurnTa,
         out IDisposable? __state)
     {
@@ -345,7 +345,7 @@ internal static class VesselLinePatch
             if (samples is null)
                 return true;
             long nowMs = Environment.TickCount64;
-            double nowSimSeconds = Universe.GetElapsedSimTime().Seconds();
+            double nowSimSeconds = Universe.GetElapsedTime().Seconds();
             bool fresh = OverlayBuffer.LineSamplesUsable(
                 vehicle.Id, samples, planned: false, nowMs, nowSimSeconds);
 
@@ -551,7 +551,7 @@ internal static class VesselLinePatch
     /// every failure degrades to no planned line for the frame; it never escapes to
     /// Prefix's actual-route stock recovery.</summary>
     private static bool RunPlannedRoute(
-        Vehicle vehicle, FlightPlan plan, Viewport viewport, bool isActive,
+        Vehicle vehicle, FlightPlan plan, IViewport viewport, bool isActive,
         out IDisposable? lease)
     {
         lease = null;
@@ -561,7 +561,7 @@ internal static class VesselLinePatch
             if (samples is null)
                 return true;
             long nowMs = Environment.TickCount64;
-            double nowSimSeconds = Universe.GetElapsedSimTime().Seconds();
+            double nowSimSeconds = Universe.GetElapsedTime().Seconds();
             bool fresh = OverlayBuffer.LineSamplesUsable(
                 vehicle.Id, samples, planned: false, nowMs, nowSimSeconds);
             if (fresh)
@@ -587,7 +587,7 @@ internal static class VesselLinePatch
     /// half. joinEnds:true matches stock's closed-ellipse rendering for conic points
     /// (our stale staged points draw with a harmless closing chord for the ≤seconds
     /// until stock's recalc replaces them).</summary>
-    private static void DrawStalePatch0(Vehicle vehicle, FlightPlan plan, Viewport viewport,
+    private static void DrawStalePatch0(Vehicle vehicle, FlightPlan plan, IViewport viewport,
         bool isActive, bool drawVehiclePosition, TrueAnomaly startTa, TrueAnomaly nextBurnTa)
     {
         if (!vehicle.ShowOrbit && !vehicle.TargetOfControlledVehicle) return;
@@ -600,7 +600,7 @@ internal static class VesselLinePatch
         double3 positionEgo = drawVehiclePosition
             ? viewport.GetCamera().GetPositionEgo(vehicle)
             : Double3Ex.NaN;
-        orbit.DrawLines(viewport, positionEgo, SimTime.Zero, color, startTa, nextBurnTa,
+        orbit.DrawLines(viewport, positionEgo, UniverseTime.Zero, color, startTa, nextBurnTa,
             joinEnds: true,
             bypassVisibilityCheck:
                 LineVisibility.BypassOrbitVisibilityCheck(viewport, isActive),
@@ -612,7 +612,7 @@ internal static class VesselLinePatch
     /// EARLIEST burn (every other burn plan is suppressed by the caller). Gates,
     /// colors and containment live in <see cref="StageAndDrawPlanned"/>, shared with
     /// the burnless-ghost fallback.</summary>
-    private static void DrawPlannedLine(Vehicle vehicle, FlightPlan plan, Viewport viewport,
+    private static void DrawPlannedLine(Vehicle vehicle, FlightPlan plan, IViewport viewport,
         bool isActive, long nowMs, double nowSimSeconds)
     {
         try
@@ -643,7 +643,7 @@ internal static class VesselLinePatch
     /// is no burn to drag on a ghost). Gate order: the cheap
     /// dictionary read rejects the common no-planned-batch case before the burn-plan
     /// scan runs.</summary>
-    private static void DrawPlannedFallback(Vehicle vehicle, Viewport viewport, bool isActive,
+    private static void DrawPlannedFallback(Vehicle vehicle, IViewport viewport, bool isActive,
         long nowMs, double nowSimSeconds)
     {
         try
@@ -669,7 +669,7 @@ internal static class VesselLinePatch
     /// isActive rule). No batch, a stale one, or a frame-mode mismatch (the ≤1 s
     /// blink, shared with the main line) draws nothing — the caller suppresses the
     /// stock conics either way.</summary>
-    private static void StageAndDrawPlanned(Vehicle vehicle, Viewport viewport, bool isActive,
+    private static void StageAndDrawPlanned(Vehicle vehicle, IViewport viewport, bool isActive,
         Orbit orbit, long nowMs, double nowSimSeconds, bool preserveStockForFallback)
     {
         var planned = OverlayBuffer.ReadPlanned(vehicle.Id);
